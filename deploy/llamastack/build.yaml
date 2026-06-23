@@ -1,0 +1,33 @@
+# Llama Stack distribution build configuration.
+#
+# Build command (from the repo root):
+#   llama stack build --config deploy/llamastack/build.yaml
+#
+# This produces a container image (or conda env) named "general-sim" that
+# bundles exactly the providers this project uses.  The resulting image is
+# what gets deployed in OpenShift; local dev can run it with Docker/Podman
+# via compose.yaml.
+#
+# Provider choices:
+#   inference   → remote::vllm     (no extra Python deps — pure HTTP)
+#   vector_io   → remote::pgvector (needs psycopg2 bundled in the image)
+#
+# Embedding note: if your vLLM endpoint does NOT serve an embedding model,
+# swap the embedding provider to inline::sentence-transformers below.
+# That adds ~500 MB to the image but eliminates the need for a second vLLM.
+
+name: general-sim
+
+distribution_spec:
+  description: >-
+    Domain-agnostic simulation & impact-reasoning platform — Llama Stack
+    distribution (inference via vLLM, vector/RAG via pgvector).
+  providers:
+    inference:
+      - remote::vllm
+      # Uncomment if using inline sentence-transformers for embeddings:
+      # - inline::sentence-transformers
+    vector_io:
+      - remote::pgvector
+
+  image_type: container

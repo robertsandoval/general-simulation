@@ -1,0 +1,90 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# vLLM via KServe InferenceService (OpenShift AI / RHOAI path).
+#
+# Prerequisites:
+#   - Red Hat OpenShift AI (RHOAI) operator installed and configured.
+#   - A DataScienceCluster with KServe enabled (RawDeployment mode recommended
+#     for single-model serving without ModelMesh).
+#   - A ServingRuntime named "vllm-runtime" available in the namespace.
+#     RHOAI ships this runtime; confirm with:
+#       oc get servingruntimes -n general-sim
+#
+# IMPORTANT — tool calling:
+#   The vLLM ServingRuntime provided by RHOAI may not include
+#   --enable-auto-tool-choice by default.  Override the runtime args or patch
+#   the ServingRuntime to add:
+#     --enable-auto-tool-choice --tool-call-parser=llama3_json
+#   Llama Stack cannot route tool calls without this.
+#
+# Model storage:
+#   Set storageUri to point at your model in S3, OCI, or a PVC.
+#   Example for S3:  s3://your-bucket/models/meta-llama/Llama-3.1-8B-Instruct
+#   Example for PVC: pvc://vllm-model-pvc/meta-llama/Llama-3.1-8B-Instruct
+#
+# Apply:
+#   oc apply -f deploy/openshift/vllm/inferenceservice.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: general-sim-vllm
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: general-sim
+  annotations:
+    # RawDeployment mode creates a plain Deployment + Service instead of
+    # using Knative Serving (no scale-to-zero, simpler networking).
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    # Reference the ServingRuntime shipped by RHOAI for vLLM.
+    # Verify the exact name in your cluster: oc get servingruntimes -n general-sim
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-runtime
+      storageUri: "s3://REPLACE_BUCKET/models/meta-llama/Llama-3.1-8B-Instruct"
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+          memory: 16Gi
+          cpu: "4"
+        limits:
+          nvidia.com/gpu: "1"
+          memory: 24Gi
+          cpu: "8"
+
+    # Schedule on GPU nodes.
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+---
+# Service to expose the KServe predictor at a stable in-cluster name.
+# KServe (RawDeployment) creates its own Service; this Service is an alias
+# so Llama Stack's run.yaml can always use http://vllm.general-sim.svc:8080.
+#
+# NOTE: after oc apply, verify that the KServe predictor pods have the label
+#   serving.kserve.io/inferenceservice: general-sim-vllm
+# and that this Service's selector matches.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: general-sim
+spec:
+  selector:
+    serving.kserve.io/inferenceservice: general-sim-vllm
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

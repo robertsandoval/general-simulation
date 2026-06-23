@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Schema bootstrap Job.
+#
+# Creates the AGE graph (sim_graph), PostGIS entity/entity_state tables, and
+# all indexes.  All DDL uses IF NOT EXISTS — safe to re-run at any time.
+# Extensions are already created by CloudNativePG's postInitSQL; this Job
+# handles the application-level schema only.
+#
+# Run this Job AFTER the Postgres Cluster reports Ready.
+# Wait for completion before starting the API Deployment.
+#
+# Apply:
+#   oc apply -f deploy/openshift/bootstrap/job.yaml
+#   oc wait --for=condition=complete job/general-sim-bootstrap -n general-sim --timeout=120s
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: general-sim-bootstrap
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/name: general-sim-bootstrap
+    app.kubernetes.io/component: bootstrap
+    app.kubernetes.io/part-of: general-sim
+spec:
+  backoffLimit: 3
+  # Clean up finished (succeeded or failed) Pods after 1 hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: general-sim-bootstrap
+        app.kubernetes.io/component: bootstrap
+    spec:
+      restartPolicy: OnFailure
+
+      # OpenShift Security Context Constraints (SCC): restricted-v2 compatible.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: bootstrap
+          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+          imagePullPolicy: Always
+
+          # Calls the bootstrap-schema entrypoint defined in pyproject.toml.
+          command: ["bootstrap-schema"]
+
+          env:
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: POSTGRES_DSN
+
+          envFrom:
+            - configMapRef:
+                name: app-config
+
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 250m
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          # /tmp is needed for Python's tempfile and asyncpg's socket paths.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}

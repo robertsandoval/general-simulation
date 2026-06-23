@@ -1,0 +1,184 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# vLLM serving — plain Deployment (always-available option).
+#
+# Use this if the KServe / OpenShift AI ModelMesh path is not available.
+# For OpenShift AI environments, prefer inferenceservice.yaml instead.
+#
+# IMPORTANT — tool-calling requirement:
+#   Llama Stack routes structured tool calls through vLLM.  vLLM MUST be
+#   started with:
+#     --enable-auto-tool-choice
+#     --tool-call-parser <parser>   # e.g. llama3_json, hermes, mistral
+#   Without this flag tool calls will produce malformed plain-text output.
+#   Choose the parser that matches your model family.
+#
+# GPU node requirement:
+#   The Pod requests 1 NVIDIA GPU.  Ensure an NVIDIA GPU Operator and the
+#   appropriate MachineSet with GPU nodes exist in your cluster.
+#
+# Model storage:
+#   The model files are expected on a PVC named vllm-model-pvc mounted at
+#   /models.  Alternatively, set HF_TOKEN and remove the volume mount — vLLM
+#   will download the model from Hugging Face Hub on first start (slow).
+#
+# Apply:
+#   oc apply -f deploy/openshift/vllm/deployment.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: general-sim
+  labels:
+    app: vllm
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: general-sim
+spec:
+  # Single replica: one GPU, one model shard.  Scale to multiple replicas
+  # only if your model fits in a single GPU; otherwise use tensor-parallelism
+  # (--tensor-parallel-size) on a multi-GPU node.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: inference
+    spec:
+      # Schedule only on GPU nodes.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: vllm
+          # Use the official vLLM OpenAI-compatible server image.
+          # For air-gapped / RHEL environments, mirror to your internal registry.
+          image: docker.io/vllm/vllm-openai:v0.6.3
+          imagePullPolicy: IfNotPresent
+
+          args:
+            - --model=/models/meta-llama/Llama-3.1-8B-Instruct
+            - --port=8080
+            - --enable-auto-tool-choice
+            # llama3_json matches Meta-Llama-3 Instruct models.
+            # Change to "hermes" for NousResearch Hermes variants.
+            - --tool-call-parser=llama3_json
+            - --max-model-len=8192
+            - --dtype=bfloat16
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: llamastack-secrets
+                  key: HF_TOKEN
+                  optional: true
+            # Silence the deprecation warning for the tokenizer
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+              memory: 16Gi
+              cpu: "4"
+            limits:
+              nvidia.com/gpu: "1"
+              memory: 24Gi
+              cpu: "8"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 10
+
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: vllm-model-pvc
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+# ClusterIP Service — used by Llama Stack's run.yaml (url: http://vllm.general-sim.svc:8080).
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: general-sim
+  labels:
+    app: vllm
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: general-sim
+spec:
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+---
+# PersistentVolumeClaim for model weights.
+# Adjust storageClassName and size to match your cluster and model.
+# Llama-3.1-8B-Instruct (bfloat16) requires ~16 GiB; 70B requires ~140 GiB.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-model-pvc
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/part-of: general-sim
+    app.kubernetes.io/component: inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+  storageClassName: ""   # set to your StorageClass, e.g. gp3-csi

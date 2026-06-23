@@ -1,0 +1,88 @@
+# Llama Stack server runtime configuration.
+#
+# Start the server (after building the distribution image):
+#   llama stack run deploy/llamastack/run.yaml
+# Or as a container (see deploy/ OpenShift manifests):
+#   podman run -e VLLM_URL=... -e POSTGRES_DSN=... general-sim llama stack run /run.yaml
+#
+# ─── vLLM requirement ────────────────────────────────────────────────────────
+# vLLM MUST be started with tool-calling enabled, e.g.:
+#   vllm serve <model> \
+#       --enable-auto-tool-choice \
+#       --tool-call-parser hermes   # or: llama3_json, mistral, internlm2, ...
+#
+# The correct parser depends on your model.  Without this flag, structured
+# tool calls through Llama Stack will silently fail or produce plain-text
+# tool invocations.  See: https://docs.vllm.ai/en/latest/features/tool_calling.html
+#
+# ─── Model risk ──────────────────────────────────────────────────────────────
+# The generation model MUST support structured tool calling with a JSON schema.
+# Llama-3 8B/70B Instruct, Mistral Instruct v0.3+, and Hermes variants are
+# known to work.  Base (non-Instruct) models and many fine-tunes do NOT.
+#
+# ─── Local dev quick-start ───────────────────────────────────────────────────
+# 1. Copy .env.example → .env, fill VLLM_URL and POSTGRES_DSN.
+# 2. Export those vars in your shell before running `llama stack run`.
+# 3. Alternatively, install ollama and override providers.inference[0] to
+#    use provider_type: remote::ollama with url: http://localhost:11434.
+#
+# ─── Env-var substitution ────────────────────────────────────────────────────
+# Llama Stack resolves ${env.VAR_NAME:default} at startup.
+# All secrets come from environment — nothing is hardcoded here.
+
+version: '2'
+image_name: general-sim
+
+# APIs this instance exposes to the application layer.
+# The app uses: inference (generate + embed) and vector_io (RAG).
+apis:
+  - inference
+  - vector_io
+  - tool_runtime
+
+providers:
+  # ── Inference (generation + embedding via vLLM) ────────────────────────────
+  inference:
+    - provider_id: vllm-inference
+      provider_type: remote::vllm
+      config:
+        url: ${env.VLLM_URL:http://localhost:8080}
+        # max_tokens controls the hard ceiling per completion request.
+        max_tokens: 4096
+
+  # ── Vector / RAG (pgvector in our Phase-2 Postgres instance) ──────────────
+  # Llama Stack owns the embedding tables it creates here.
+  # Do NOT create those tables manually — the provider manages them.
+  vector_io:
+    - provider_id: pgvector-store
+      provider_type: remote::pgvector
+      config:
+        host: ${env.PGVECTOR_HOST:localhost}
+        port: ${env.PGVECTOR_PORT:5432}
+        db: ${env.PGVECTOR_DB:sim}
+        user: ${env.PGVECTOR_USER:sim}
+        password: ${env.PGVECTOR_PASSWORD:sim}
+
+# ── Registered models ─────────────────────────────────────────────────────────
+# Both model IDs must match what is served by vLLM.
+# If your vLLM does NOT serve the embedding model, replace provider_id for the
+# embedding entry with an inline provider (e.g. inline::sentence-transformers)
+# and add that provider to the inference list above.
+models:
+  - model_id: ${env.GENERATION_MODEL_ID:meta-llama/Llama-3.1-8B-Instruct}
+    provider_id: vllm-inference
+    model_type: llm
+
+  - model_id: ${env.EMBEDDING_MODEL_ID:all-MiniLM-L6-v2}
+    provider_id: vllm-inference
+    model_type: embedding
+
+# ── Pre-registered vector DB ─────────────────────────────────────────────────
+# The app also registers vector DBs dynamically at runtime via the API; this
+# entry just ensures a default RAG store exists at server startup.
+vector_dbs:
+  - vector_db_id: rag_store
+    embedding_model: ${env.EMBEDDING_MODEL_ID:all-MiniLM-L6-v2}
+    embedding_dimension: ${env.EMBEDDING_DIMENSION:384}
+    provider_id: pgvector-store
+    provider_vector_db_id: rag_store

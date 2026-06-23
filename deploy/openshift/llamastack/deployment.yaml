@@ -1,0 +1,165 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Llama Stack server — plain Deployment.
+#
+# The Llama Stack distribution image is built from deploy/llamastack/build.yaml
+# using the `llama stack build` CLI.  Build and push once per distribution
+# change:
+#
+#   llama stack build deploy/llamastack/build.yaml
+#   podman tag distribution-general-sim:dev \
+#     image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
+#   podman push \
+#     image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
+#
+# Alternative — OpenShift AI LlamaStackDistribution CR:
+#   If the Llama Stack Operator is installed via RHOAI, you can replace this
+#   Deployment with a LlamaStackDistribution CR.  See the operator docs at
+#   https://github.com/meta-llama/llama-stack/tree/main/distributions/openshift
+#   The plain Deployment below works without the operator and is easier to
+#   reason about for the MVP.
+#
+# Prerequisites:
+#   - Postgres Cluster ready (general-sim-postgres-rw Service reachable).
+#   - vLLM Deployment/InferenceService running (vllm Service reachable).
+#   - Secrets: llamastack-secrets (PGVECTOR_PASSWORD, HF_TOKEN).
+#   - ConfigMap: llamastack-run-config (run.yaml).
+#
+# Apply:
+#   oc apply -f deploy/openshift/llamastack/deployment.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llamastack
+  namespace: general-sim
+  labels:
+    app: llamastack
+    app.kubernetes.io/name: llamastack
+    app.kubernetes.io/component: llamastack
+    app.kubernetes.io/part-of: general-sim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llamastack
+  template:
+    metadata:
+      labels:
+        app: llamastack
+        app.kubernetes.io/name: llamastack
+        app.kubernetes.io/component: llamastack
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: llamastack
+          image: image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
+          imagePullPolicy: Always
+
+          # llama stack run reads the config file and exposes the APIs.
+          command: ["llama", "stack", "run"]
+          args: ["/etc/llamastack/run.yaml", "--port", "8321"]
+
+          ports:
+            - name: http
+              containerPort: 8321
+              protocol: TCP
+
+          env:
+            # Injected from Secret so they are available for ${env.VAR} substitution
+            # inside run.yaml at Llama Stack startup.
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llamastack-secrets
+                  key: PGVECTOR_PASSWORD
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: llamastack-secrets
+                  key: HF_TOKEN
+                  optional: true
+            # Pass model IDs so run.yaml ${env.GENERATION_MODEL_ID:...} resolves.
+            - name: GENERATION_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: GENERATION_MODEL_ID
+            - name: EMBEDDING_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: EMBEDDING_MODEL_ID
+            - name: EMBEDDING_DIMENSION
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: EMBEDDING_DIMENSION
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: "2"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 5
+
+          volumeMounts:
+            - name: run-config
+              mountPath: /etc/llamastack
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: run-config
+          configMap:
+            name: llamastack-run-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llamastack
+  namespace: general-sim
+  labels:
+    app: llamastack
+    app.kubernetes.io/name: llamastack
+    app.kubernetes.io/component: llamastack
+    app.kubernetes.io/part-of: general-sim
+spec:
+  selector:
+    app: llamastack
+  ports:
+    - name: http
+      port: 8321
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP

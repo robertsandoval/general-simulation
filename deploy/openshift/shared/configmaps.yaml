@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-sensitive application configuration.
+# Secrets (DSN passwords, tokens) live in shared/secrets.yaml, not here.
+#
+# Apply:
+#   oc apply -f deploy/openshift/shared/configmaps.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+---
+# Application feature flags and model identifiers.
+# Referenced by the API Deployment, the bootstrap Job, and the ingestion CronJob.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/part-of: general-sim
+data:
+  GENERATION_MODEL_ID: "meta-llama/Llama-3.1-8B-Instruct"
+  EMBEDDING_MODEL_ID: "all-MiniLM-L6-v2"
+  EMBEDDING_DIMENSION: "384"
+  USE_FAKE_LLAMA_STACK: "false"
+---
+# Llama Stack runtime configuration (deploy/llamastack/run.yaml).
+# Mounted read-only into the Llama Stack server container at /etc/llamastack/run.yaml.
+#
+# Key in-cluster service FQDNs:
+#   vLLM inference : http://vllm.general-sim.svc:8080
+#   pgvector store : general-sim-postgres-rw.general-sim.svc (CNPG primary)
+#
+# All sensitive values (PGVECTOR_PASSWORD, HF_TOKEN) are injected from
+# llamastack-secrets; they never appear in this ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llamastack-run-config
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/part-of: general-sim
+    app.kubernetes.io/component: llamastack
+data:
+  run.yaml: |
+    version: '2'
+    image_name: general-sim
+
+    apis:
+      - inference
+      - vector_io
+      - tool_runtime
+
+    providers:
+      inference:
+        - provider_id: vllm-inference
+          provider_type: remote::vllm
+          config:
+            url: http://vllm.general-sim.svc:8080
+            max_tokens: 4096
+
+      vector_io:
+        - provider_id: pgvector-store
+          provider_type: remote::pgvector
+          config:
+            host: general-sim-postgres-rw.general-sim.svc
+            port: 5432
+            db: sim
+            user: sim
+            password: ${env.PGVECTOR_PASSWORD}
+
+    models:
+      - model_id: ${env.GENERATION_MODEL_ID:meta-llama/Llama-3.1-8B-Instruct}
+        provider_id: vllm-inference
+        model_type: llm
+
+      - model_id: ${env.EMBEDDING_MODEL_ID:all-MiniLM-L6-v2}
+        provider_id: vllm-inference
+        model_type: embedding
+
+    vector_dbs:
+      - vector_db_id: rag_store
+        embedding_model: ${env.EMBEDDING_MODEL_ID:all-MiniLM-L6-v2}
+        embedding_dimension: ${env.EMBEDDING_DIMENSION:384}
+        provider_id: pgvector-store
+        provider_vector_db_id: rag_store

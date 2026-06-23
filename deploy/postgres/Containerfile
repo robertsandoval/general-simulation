@@ -1,0 +1,74 @@
+# Custom PostgreSQL image bundling Apache AGE, pgvector, and PostGIS.
+#
+# NOTE: This is the riskiest build step in the project.  If it fails, check:
+#   - That the AGE_VERSION tag exists on https://github.com/apache/age/releases
+#     (tag format is "v<version>", e.g. v1.5.0).
+#   - That PGVECTOR_VERSION matches a tag on https://github.com/pgvector/pgvector.
+#   - That postgresql-16-postgis-3 is available in the PGDG apt mirror.
+#
+# Build args let you pin or override individual component versions without
+# changing this file.  OpenShift builds should pass --build-arg overrides.
+#
+# AGE requires shared_preload_libraries = 'age' at server start.
+# This is NOT set in postgresql.conf here — pass it at runtime via:
+#   postgres -c shared_preload_libraries=age
+# (the compose.yaml does this; OpenShift manifests must do the same).
+
+FROM postgres:16.3-bookworm
+
+ARG PGVECTOR_VERSION=0.8.0
+ARG AGE_VERSION=1.5.0
+# PostGIS major version (package name: postgresql-16-postgis-<POSTGIS_MAJOR>)
+ARG POSTGIS_MAJOR=3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Single RUN layer: install build tools, compile pgvector & AGE, remove tools ─
+RUN set -eux; \
+    apt-get update; \
+    # PostGIS runtime (no compilation needed — available in PGDG apt)
+    apt-get install -y --no-install-recommends \
+        "postgresql-16-postgis-${POSTGIS_MAJOR}" \
+        "postgresql-16-postgis-${POSTGIS_MAJOR}-scripts"; \
+    # Build tools needed for pgvector and AGE
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        postgresql-server-dev-16 \
+        libreadline-dev \
+        flex \
+        bison; \
+    \
+    # ── pgvector ──────────────────────────────────────────────────────────────
+    git clone \
+        --branch "v${PGVECTOR_VERSION}" \
+        --depth 1 \
+        https://github.com/pgvector/pgvector.git /tmp/pgvector; \
+    cd /tmp/pgvector; \
+    make; \
+    make install; \
+    cd /; \
+    rm -rf /tmp/pgvector; \
+    \
+    # ── Apache AGE ────────────────────────────────────────────────────────────
+    # AGE must be in shared_preload_libraries (handled at runtime, not here).
+    git clone \
+        --branch "v${AGE_VERSION}" \
+        --depth 1 \
+        https://github.com/apache/age.git /tmp/age; \
+    cd /tmp/age; \
+    make; \
+    make install; \
+    cd /; \
+    rm -rf /tmp/age; \
+    \
+    # ── Strip build toolchain to keep the image lean ──────────────────────────
+    apt-get purge -y \
+        build-essential \
+        git \
+        postgresql-server-dev-16 \
+        libreadline-dev \
+        flex \
+        bison; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*

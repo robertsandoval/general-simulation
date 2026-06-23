@@ -1,0 +1,31 @@
+# OpenShift Route — exposes the API externally via the cluster ingress.
+#
+# TLS is terminated at the edge (OpenShift ingress controller handles the cert).
+# Traffic within the cluster travels unencrypted over HTTP; enable
+# spec.tls.termination: reencrypt for end-to-end TLS if required.
+#
+# The hostname is auto-assigned by the ingress controller if omitted.
+# Set spec.host explicitly to use a custom domain, e.g.:
+#   host: general-sim-api.apps.your-cluster.example.com
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: general-sim-api
+  namespace: general-sim
+  labels:
+    app: general-sim-api
+    app.kubernetes.io/name: general-sim-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: general-sim
+spec:
+  # host: general-sim-api.apps.REPLACE_WITH_CLUSTER_DOMAIN
+  to:
+    kind: Service
+    name: general-sim-api
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

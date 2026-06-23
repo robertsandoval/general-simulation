@@ -1,0 +1,68 @@
+# FastAPI application image.
+#
+# Build (from repo root):
+#   podman build -f deploy/app/Containerfile -t general-sim-app:latest .
+#
+# Run locally (expects .env in cwd):
+#   podman run --env-file .env -p 8000:8000 general-sim-app:latest
+#
+# Push to OpenShift internal registry (after oc login):
+#   podman tag general-sim-app:latest \
+#     image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+#   podman push \
+#     image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+#
+# Design notes:
+#   - UBI9 Python 3.11 base (Red Hat supported, OCI-compliant).
+#   - Multi-stage: build stage compiles deps into a venv; runtime stage is minimal.
+#   - Runs as UID 1001; group 0 has read/execute so OpenShift arbitrary-UID can run.
+#   - No secrets baked in; all config comes from env / mounted secrets.
+
+# ── Stage 1: dependency builder ───────────────────────────────────────────────
+FROM registry.access.redhat.com/ubi9/python-311:1 AS builder
+
+WORKDIR /build
+
+# Install uv for fast, reproducible installs
+RUN pip install --no-cache-dir uv
+
+# Copy dependency manifests first for optimal layer caching.
+# uv.lock is committed alongside pyproject.toml; include README so hatchling
+# doesn't complain about a missing readme during the editable install.
+COPY pyproject.toml uv.lock README.md ./
+
+# Install all runtime dependencies into the project venv.
+# --no-install-project: skip installing the package itself (we COPY src/ below).
+# --frozen: fail if uv.lock is out of sync with pyproject.toml.
+RUN uv sync --no-dev --frozen --no-install-project
+
+# Copy application source after deps for better layer cache reuse.
+COPY src/ ./src/
+
+# ── Stage 2: minimal runtime image ────────────────────────────────────────────
+FROM registry.access.redhat.com/ubi9/python-311:1
+
+WORKDIR /app
+
+# Bring the pre-built venv and source from the builder stage.
+COPY --from=builder /build/.venv      /app/.venv
+COPY --from=builder /build/src        /app/src
+COPY --from=builder /build/pyproject.toml /app/pyproject.toml
+
+# Activate the venv for all subsequent RUN / CMD / ENTRYPOINT invocations.
+ENV PATH="/app/.venv/bin:$PATH"
+# Make `from src.xxx import ...` work without an editable install.
+ENV PYTHONPATH="/app"
+
+# OpenShift runs containers with a random UID in the root group.
+# Ensure group 0 (root) has the same permissions as the owner so the
+# arbitrary UID can read/execute everything.
+RUN chown -R 1001:0 /app && chmod -R g=u /app
+
+# Drop to non-root; OpenShift will override the UID at runtime.
+USER 1001
+
+EXPOSE 8000
+
+# Uvicorn is installed inside the venv.
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,103 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingestion CronJob — runs the ingestion runner on a schedule.
+#
+# The runner calls `uv run ingest-run` (defined in pyproject.toml [project.scripts]).
+# It pulls from all registered adapters (currently: usgs_earthquakes) and upserts
+# canonical entities into the PostGIS live store.
+#
+# The job is intentionally kept stateless and idempotent (UPSERT semantics in
+# the runner), so missing a run or running twice has no lasting side effects.
+#
+# Adjust the schedule (cron expression) to match your data freshness requirements.
+# The USGS "past hour" feed updates every 5 minutes; polling every 10 minutes
+# is a reasonable default.
+#
+# Apply:
+#   oc apply -f deploy/openshift/ingestion/cronjob.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: general-sim-ingestion
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/name: general-sim-ingestion
+    app.kubernetes.io/component: ingestion
+    app.kubernetes.io/part-of: general-sim
+spec:
+  # Every 10 minutes.  Adjust as needed; cron format: minute hour day month weekday.
+  schedule: "*/10 * * * *"
+
+  # Do not start a new run if the previous one is still running.
+  concurrencyPolicy: Forbid
+
+  # Keep the last 3 successful and 1 failed Job for log inspection.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  # Missed runs older than 30 minutes are skipped (e.g. after cluster maintenance).
+  startingDeadlineSeconds: 1800
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300   # kill the Job if it runs longer than 5 minutes
+
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: general-sim-ingestion
+            app.kubernetes.io/component: ingestion
+        spec:
+          restartPolicy: OnFailure
+
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+
+          containers:
+            - name: ingest
+              image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+              imagePullPolicy: Always
+
+              # Entrypoint defined in pyproject.toml [project.scripts].
+              command: ["ingest-run"]
+
+              env:
+                - name: POSTGRES_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: POSTGRES_DSN
+                - name: LLAMA_STACK_BASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: LLAMA_STACK_BASE_URL
+
+              envFrom:
+                - configMapRef:
+                    name: app-config
+
+              resources:
+                requests:
+                  memory: 128Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m
+
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+
+          volumes:
+            - name: tmp
+              emptyDir: {}
