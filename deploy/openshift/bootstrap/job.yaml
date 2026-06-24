@@ -3,10 +3,10 @@
 #
 # Creates the AGE graph (sim_graph), PostGIS entity/entity_state tables, and
 # all indexes.  All DDL uses IF NOT EXISTS — safe to re-run at any time.
-# Extensions are already created by CloudNativePG's postInitSQL; this Job
-# handles the application-level schema only.
+# Extensions (age, vector, postgis) are created by the Postgres init script
+# on first container startup; this Job handles the application-level schema.
 #
-# Run this Job AFTER the Postgres Cluster reports Ready.
+# Run this Job AFTER the Postgres StatefulSet Pod reports Ready.
 # Wait for completion before starting the API Deployment.
 #
 # Apply:

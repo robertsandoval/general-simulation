@@ -77,7 +77,7 @@ The important boundary to understand is what Llama Stack does **not** cover. The
 
 ### PostgreSQL — one database, three jobs
 
-A single Postgres instance, managed by an operator (CloudNativePG or the Crunchy Postgres Operator), carries all persistent state through three extensions. Consolidating into one database keeps the OpenShift footprint small and means the graph, the embeddings, and the live snapshot can be correlated in one place.
+A single Postgres instance carries all persistent state through three extensions. Consolidating into one database keeps the OpenShift footprint small and means the graph, the embeddings, and the live snapshot can be correlated in one place.
 
 | Extension | Role | Accessed via |
 |---|---|---|
@@ -280,12 +280,13 @@ each step must succeed before the next one starts.
 | Requirement | Notes |
 |---|---|
 | OpenShift 4.13+ | Tested against OCP 4.14/4.15 |
-| `oc` CLI logged in | `oc login ...` with cluster-admin or a role that can create all resource types below |
+| `oc` CLI logged in | `oc login ...` with a role that can create Deployments, StatefulSets, Services, Routes, Jobs, CronJobs, Secrets, ConfigMaps, and ServiceAccounts |
 | GPU nodes | Required for vLLM only; CPU nodes sufficient for everything else |
 | NVIDIA GPU Operator | Install via OperatorHub if using the plain vLLM Deployment |
-| CloudNativePG operator | See step 2 |
 | (Optional) Red Hat OpenShift AI | Required only for the KServe `InferenceService` vLLM path |
 | Podman / Docker | To build and push images |
+
+No additional operators are required. Postgres runs as a plain StatefulSet.
 
 ---
 
@@ -298,19 +299,7 @@ oc project general-sim
 
 ---
 
-### Step 2 — Install the CloudNativePG operator
-
-```bash
-# Install CNPG cluster-wide (requires cluster-admin)
-oc apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.0.yaml
-
-# Wait for the operator to be ready
-oc rollout status deployment/cnpg-controller-manager -n cnpg-system --timeout=120s
-```
-
----
-
-### Step 3 — Apply secrets and ConfigMaps
+### Step 2 — Apply secrets and ConfigMaps
 
 > **Important:** Replace every `REPLACE_ME` value in `shared/secrets.yaml`
 > before applying.  Never commit real secrets.
@@ -325,66 +314,53 @@ oc apply -f deploy/openshift/shared/configmaps.yaml
 
 ---
 
-### Step 4 — Build and push images
-
-#### Custom Postgres (CloudNativePG-compatible)
+### Step 3 — Build and push images
 
 ```bash
-# Log in to the internal registry
+# Log in to the OpenShift internal registry
 oc registry login
 
+# Custom Postgres image (AGE + pgvector + PostGIS)
 podman build \
-  -f deploy/postgres/Containerfile.cnpg \
+  -f deploy/postgres/Containerfile \
   -t image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest \
   deploy/postgres
-
 podman push \
   image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest
-```
 
-#### FastAPI application
-
-```bash
+# FastAPI application
 podman build \
   -f deploy/app/Containerfile \
   -t image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest \
   .
-
 podman push \
   image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
-```
 
-#### Llama Stack distribution
-
-```bash
-# Build the Llama Stack distribution image from the provider config
+# Llama Stack distribution image
 llama stack build --config deploy/llamastack/build.yaml
-
 podman tag distribution-general-sim:dev \
   image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
-
 podman push \
   image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
 ```
 
 ---
 
-### Step 5 — Deploy Postgres
+### Step 4 — Deploy Postgres
 
 ```bash
-oc apply -f deploy/openshift/postgres/cluster.yaml
+# Grant the postgres ServiceAccount permission to run as UID 999
+oc adm policy add-scc-to-user anyuid -z postgres-sa -n general-sim
 
-# Wait until the primary instance is ready (can take 2-3 minutes on first run
-# because the custom image compiles AGE and pgvector)
-oc wait cluster/general-sim-postgres \
-  -n general-sim \
-  --for=condition=Ready \
-  --timeout=300s
+oc apply -f deploy/openshift/postgres/statefulset.yaml
+
+# Wait until the Pod is running and ready
+oc rollout status statefulset/postgres -n general-sim --timeout=300s
 ```
 
 ---
 
-### Step 6 — Run the schema bootstrap Job
+### Step 5 — Run the schema bootstrap Job
 
 ```bash
 oc apply -f deploy/openshift/bootstrap/job.yaml
@@ -400,7 +376,7 @@ oc logs job/general-sim-bootstrap -n general-sim
 
 ---
 
-### Step 7 — Deploy vLLM
+### Step 6 — Deploy vLLM
 
 **Option A — Plain Deployment** (works on any GPU-enabled OpenShift):
 
@@ -431,7 +407,7 @@ oc exec -n general-sim deployment/vllm -- \
 
 ---
 
-### Step 8 — Deploy Llama Stack
+### Step 7 — Deploy Llama Stack
 
 ```bash
 oc apply -f deploy/openshift/llamastack/deployment.yaml
@@ -444,7 +420,7 @@ oc logs deployment/llamastack -n general-sim | tail -20
 
 ---
 
-### Step 9 — Deploy the API
+### Step 8 — Deploy the API
 
 ```bash
 oc apply -f deploy/openshift/api/deployment.yaml
@@ -467,7 +443,7 @@ curl -s https://$ROUTE/health | jq .
 
 ---
 
-### Step 10 — Create the ingestion CronJob
+### Step 9 — Create the ingestion CronJob
 
 ```bash
 oc apply -f deploy/openshift/ingestion/cronjob.yaml
@@ -489,22 +465,21 @@ oc wait job/general-sim-ingestion-manual \
 
 ```
 Step 1  namespace.yaml
-Step 2  Install CloudNativePG operator
-Step 3  shared/secrets.yaml + shared/configmaps.yaml
-Step 4  Build & push: general-sim-postgres, general-sim-app, llamastack-general-sim
-Step 5  postgres/cluster.yaml  →  wait Ready
-Step 6  bootstrap/job.yaml     →  wait complete
-Step 7  vllm/deployment.yaml (or vllm/inferenceservice.yaml)  →  verify /health
-Step 8  llamastack/deployment.yaml  →  verify logs
-Step 9  api/deployment.yaml + api/service.yaml + api/route.yaml  →  smoke-test /health
-Step 10 ingestion/cronjob.yaml  →  trigger manual run
+Step 2  shared/secrets.yaml + shared/configmaps.yaml
+Step 3  Build & push: general-sim-postgres, general-sim-app, llamastack-general-sim
+Step 4  postgres/statefulset.yaml  →  wait rollout
+Step 5  bootstrap/job.yaml         →  wait complete
+Step 6  vllm/deployment.yaml (or vllm/inferenceservice.yaml)  →  verify /health
+Step 7  llamastack/deployment.yaml  →  verify logs
+Step 8  api/deployment.yaml + api/service.yaml + api/route.yaml  →  smoke-test /health
+Step 9  ingestion/cronjob.yaml  →  trigger manual run
 ```
 
 ### In-cluster service FQDNs
 
 | Service | URL |
 |---|---|
-| Postgres primary (R/W) | `general-sim-postgres-rw.general-sim.svc:5432` |
+| Postgres | `postgres.general-sim.svc:5432` |
 | vLLM | `http://vllm.general-sim.svc:8080` |
 | Llama Stack | `http://llamastack.general-sim.svc:8321` |
 | API | `http://general-sim-api.general-sim.svc:8000` |
@@ -512,4 +487,4 @@ Step 10 ingestion/cronjob.yaml  →  trigger manual run
 ---
 
 See `deploy/openshift/` for the full manifest set and `deploy/app/Containerfile` /
-`deploy/postgres/Containerfile.cnpg` for the container build instructions.
+`deploy/postgres/Containerfile` for the container build instructions.

@@ -6,6 +6,27 @@
 #   oc apply -f deploy/openshift/shared/configmaps.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 ---
+# Postgres init script — mounted into /docker-entrypoint-initdb.d/ by the
+# StatefulSet so extensions are created on first startup.
+# Mirrors deploy/postgres/init/01_extensions.sql.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/part-of: general-sim
+    app.kubernetes.io/component: postgres
+data:
+  01_extensions.sql: |
+    -- Runs once when the Postgres container first initialises (empty PGDATA).
+    -- The server must already have shared_preload_libraries=age set (done via
+    -- the StatefulSet command args).
+    -- Llama Stack owns the pgvector embedding tables — do NOT create them here.
+    CREATE EXTENSION IF NOT EXISTS age;
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS postgis;
+---
 # Application feature flags and model identifiers.
 # Referenced by the API Deployment, the bootstrap Job, and the ingestion CronJob.
 apiVersion: v1
@@ -26,7 +47,7 @@ data:
 #
 # Key in-cluster service FQDNs:
 #   vLLM inference : http://vllm.general-sim.svc:8080
-#   pgvector store : general-sim-postgres-rw.general-sim.svc (CNPG primary)
+#   pgvector store : postgres.general-sim.svc (StatefulSet ClusterIP Service)
 #
 # All sensitive values (PGVECTOR_PASSWORD, HF_TOKEN) are injected from
 # llamastack-secrets; they never appear in this ConfigMap.
@@ -60,7 +81,7 @@ data:
         - provider_id: pgvector-store
           provider_type: remote::pgvector
           config:
-            host: general-sim-postgres-rw.general-sim.svc
+            host: postgres.general-sim.svc
             port: 5432
             db: sim
             user: sim

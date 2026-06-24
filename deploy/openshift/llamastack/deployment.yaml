@@ -19,7 +19,7 @@
 #   reason about for the MVP.
 #
 # Prerequisites:
-#   - Postgres Cluster ready (general-sim-postgres-rw Service reachable).
+#   - Postgres StatefulSet ready (postgres Service reachable at postgres.general-sim.svc:5432).
 #   - vLLM Deployment/InferenceService running (vllm Service reachable).
 #   - Secrets: llamastack-secrets (PGVECTOR_PASSWORD, HF_TOKEN).
 #   - ConfigMap: llamastack-run-config (run.yaml).

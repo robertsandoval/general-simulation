@@ -1,0 +1,206 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PostgreSQL StatefulSet with AGE, pgvector, and PostGIS.
+#
+# No operator required — plain Kubernetes primitives only.
+#
+# Build and push the custom Postgres image (from repo root):
+#   podman build \
+#     -f deploy/postgres/Containerfile \
+#     -t image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest \
+#     deploy/postgres
+#   podman push \
+#     image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest
+#
+# The Service is named "postgres" — all in-cluster clients connect to:
+#   postgres.general-sim.svc:5432
+#
+# OpenShift SCC note:
+#   The official Postgres image runs as UID 999 (the postgres user).
+#   OpenShift's default "restricted-v2" SCC does not allow a fixed UID.
+#   Grant the postgres-sa ServiceAccount the "anyuid" SCC once after
+#   creating the namespace:
+#     oc adm policy add-scc-to-user anyuid \
+#       -z postgres-sa -n general-sim
+#
+# Apply:
+#   oc apply -f deploy/openshift/postgres/statefulset.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+---
+# ServiceAccount used by the Postgres Pod.
+# Needs the "anyuid" SCC (see note above) so the container can run as UID 999.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-sa
+  namespace: general-sim
+  labels:
+    app.kubernetes.io/part-of: general-sim
+    app.kubernetes.io/component: postgres
+---
+# Headless Service — required by StatefulSet for stable DNS.
+# Pods are addressable as postgres-0.postgres-headless.general-sim.svc
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: general-sim
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: general-sim
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+# ClusterIP Service — used by the application, Llama Stack, and the bootstrap Job.
+# All in-cluster clients connect to: postgres.general-sim.svc:5432
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: general-sim
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: general-sim
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: general-sim
+  labels:
+    app: postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: general-sim
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: postgres
+    spec:
+      serviceAccountName: postgres-sa
+
+      # fsGroup 999 ensures the PVC is owned by the postgres group so the
+      # container can read/write its data directory.
+      securityContext:
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: postgres
+          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest
+          imagePullPolicy: Always
+
+          # Pass AGE's shared_preload_libraries and quiet the logs.
+          command:
+            - postgres
+            - -c
+            - shared_preload_libraries=age
+            - -c
+            - log_min_messages=warning
+            - -c
+            - log_connections=off
+
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: POSTGRES_DB
+              value: sim
+            # Use a sub-directory of the mount so the PVC root is never
+            # treated as PGDATA (postgres rejects non-empty directories).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: "1"
+
+          securityContext:
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "sim", "-d", "sim"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "sim", "-d", "sim"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            # Init scripts run once on first startup (empty PGDATA directory).
+            # They create the AGE, pgvector, and PostGIS extensions.
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+
+  # PVC is created automatically per Pod and persists across restarts.
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app.kubernetes.io/part-of: general-sim
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            # Adjust to fit your model data + WAL + pgvector indexes.
+            storage: 10Gi
+        # storageClassName: ""   # uncomment and set your StorageClass if needed
