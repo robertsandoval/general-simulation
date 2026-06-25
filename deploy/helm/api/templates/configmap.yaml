@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+data:
+  GENERATION_MODEL_ID: {{ .Values.models.generation | quote }}
+  EMBEDDING_MODEL_ID: {{ .Values.models.embedding | quote }}
+  EMBEDDING_DIMENSION: {{ .Values.models.embeddingDimension | quote }}
+  USE_FAKE_LLAMA_STACK: {{ .Values.models.useFakeLlamaStack | quote }}

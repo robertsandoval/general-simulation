@@ -1,0 +1,24 @@
+image: quay.io/robertsandoval/llamastack-general-sim:latest
+
+postgres:
+  host: postgres.general-sim.svc
+  port: 5432
+  user: sim
+  password: ""   # required — pass via --set postgres.password=<pw>
+  database: sim
+
+vllm:
+  url: http://vllm.general-sim.svc:8080
+
+models:
+  generation: meta-llama/Llama-3.1-8B-Instruct
+  embedding: all-MiniLM-L6-v2
+  embeddingDimension: 384
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 2Gi
+    cpu: "2"

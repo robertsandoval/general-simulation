@@ -1,0 +1,9 @@
+apiVersion: v2
+name: api
+description: >
+  FastAPI reasoning-pipeline application for the General Simulation Platform.
+  Exposes the /health and /query endpoints and orchestrates the three-stage
+  reasoning pipeline against Postgres (AGE + pgvector) and Llama Stack.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

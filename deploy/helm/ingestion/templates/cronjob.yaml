@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: general-sim-ingestion
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ingestion.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "ingestion.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: ingestion
+              image: {{ .Values.image }}
+              imagePullPolicy: Always
+              command:
+                - python
+                - -m
+                - ingestion
+                - {{ .Values.adapterId | quote }}
+              env:
+                - name: POSTGRES_DSN
+                  value: {{ include "ingestion.postgresDSN" . | quote }}
+                - name: LLAMA_STACK_BASE_URL
+                  value: {{ .Values.llamastack.url | quote }}
+                - name: GENERATION_MODEL_ID
+                  value: {{ .Values.models.generation | quote }}
+                - name: EMBEDDING_MODEL_ID
+                  value: {{ .Values.models.embedding | quote }}
+                - name: EMBEDDING_DIMENSION
+                  value: {{ .Values.models.embeddingDimension | quote }}
+                - name: USE_FAKE_LLAMA_STACK
+                  value: {{ .Values.models.useFakeLlamaStack | quote }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

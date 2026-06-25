@@ -1,0 +1,15 @@
+apiVersion: v2
+name: postgres
+description: >
+  PostgreSQL StatefulSet with Apache AGE, pgvector, and PostGIS for the
+  General Simulation & Impact-Reasoning Platform.
+type: application
+version: 0.1.0
+appVersion: "16.3"
+keywords:
+  - postgresql
+  - age
+  - pgvector
+  - postgis
+maintainers:
+  - name: general-sim

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: bootstrap
+description: >
+  Idempotent schema bootstrap Job for the General Simulation Platform.
+  Creates the AGE graph, PostGIS entity tables, and indexes.
+  Runs as a Helm post-install/post-upgrade hook so it executes automatically
+  on every helm upgrade --install and is cleaned up on success.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

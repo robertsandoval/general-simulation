@@ -1,0 +1,16 @@
+image: quay.io/robertsandoval/general-sim-app:latest
+
+postgres:
+  host: postgres.general-sim.svc
+  port: 5432
+  user: sim
+  password: ""   # required — pass via --set postgres.password=<pw>
+  database: sim
+
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 250m

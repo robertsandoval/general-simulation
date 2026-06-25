@@ -1,0 +1,25 @@
+# Default values for the postgres chart.
+# Override sensitive values with --set on the command line; never commit them.
+
+# Container image (override with --set image=... or make build-postgres)
+image: quay.io/robertsandoval/general-sim-postgres:latest
+
+# Database credentials
+# postgres.password has no default — pass via: --set postgres.password=<pw>
+postgres:
+  username: sim
+  password: ""
+  database: sim
+
+# PersistentVolumeClaim size for Postgres data
+storage:
+  size: 10Gi
+  # storageClassName: ""   # uncomment and set if not using the cluster default
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 2Gi
+    cpu: "1"

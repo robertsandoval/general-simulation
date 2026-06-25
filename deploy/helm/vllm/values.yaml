@@ -1,0 +1,37 @@
+image: docker.io/vllm/vllm-openai:v0.6.3
+
+model:
+  # Path inside the container / PVC where the model weights are stored.
+  path: /models/meta-llama/Llama-3.1-8B-Instruct
+  # Tool-call parser matching the Llama 3.1 chat template.
+  toolCallParser: llama3_json
+  maxModelLen: 8192
+
+# Set hfToken to your Hugging Face token if the model requires authentication.
+# Pass via --set vllm.hfToken=<token> — never commit a real token.
+hfToken: ""
+
+storage:
+  size: 30Gi
+  # storageClassName: ""
+
+# GPU resource requests/limits.
+# Requires the NVIDIA device plugin DaemonSet on the cluster.
+resources:
+  requests:
+    memory: 16Gi
+    cpu: "4"
+    nvidia.com/gpu: "1"
+  limits:
+    memory: 24Gi
+    cpu: "8"
+    nvidia.com/gpu: "1"
+
+# Node selector to land the pod on a GPU node.
+nodeSelector:
+  nvidia.com/gpu.present: "true"
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule

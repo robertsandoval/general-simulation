@@ -1,0 +1,9 @@
+apiVersion: v2
+name: vllm
+description: >
+  vLLM OpenAI-compatible inference server for the General Simulation Platform.
+  Requires a GPU node with the NVIDIA device plugin. Serves Llama 3.1 with
+  tool-call support enabled.
+type: application
+version: 0.1.0
+appVersion: "0.6.3"

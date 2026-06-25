@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: general-sim-bootstrap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bootstrap.labels" . | nindent 4 }}
+  annotations:
+    # Helm hook — runs after all chart resources are applied.
+    "helm.sh/hook": post-install,post-upgrade
+    # Delete the old Job before creating a new one (idempotent re-runs).
+    # Succeeded Jobs are also cleaned up automatically.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "bootstrap.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: {{ .Values.image }}
+          imagePullPolicy: Always
+          command: ["bootstrap-schema"]
+          env:
+            - name: POSTGRES_DSN
+              value: {{ include "bootstrap.postgresDSN" . | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

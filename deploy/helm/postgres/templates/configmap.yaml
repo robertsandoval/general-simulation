@@ -1,0 +1,16 @@
+# Init SQL mounted at /docker-entrypoint-initdb.d/ — runs once on first startup.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+data:
+  01_extensions.sql: |
+    -- Runs once when the Postgres container first initialises (empty PGDATA).
+    -- shared_preload_libraries=age is set via the StatefulSet command args.
+    -- Llama Stack owns the pgvector embedding tables; do NOT create them here.
+    CREATE EXTENSION IF NOT EXISTS age;
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS postgis;

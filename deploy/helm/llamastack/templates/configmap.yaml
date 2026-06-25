@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llamastack-run-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llamastack.labels" . | nindent 4 }}
+data:
+  run.yaml: |
+    version: "2"
+    image_name: general-sim
+    providers:
+      inference:
+        - provider_id: vllm
+          provider_type: remote::vllm
+          config:
+            url: {{ .Values.vllm.url }}
+      vector_io:
+        - provider_id: pgvector
+          provider_type: remote::pgvector
+          config:
+            host: {{ .Values.postgres.host }}
+            port: {{ .Values.postgres.port }}
+            db: {{ .Values.postgres.database }}
+            user: {{ .Values.postgres.user }}
+            password: ${env.PGVECTOR_PASSWORD}
+      memory:
+        - provider_id: pgvector
+          provider_type: remote::pgvector
+          config:
+            host: {{ .Values.postgres.host }}
+            port: {{ .Values.postgres.port }}
+            db: {{ .Values.postgres.database }}
+            user: {{ .Values.postgres.user }}
+            password: ${env.PGVECTOR_PASSWORD}
+    models:
+      - model_id: {{ .Values.models.generation | quote }}
+        provider_id: vllm
+        model_type: llm
+      - model_id: {{ .Values.models.embedding | quote }}
+        provider_id: vllm
+        model_type: embedding
+    vector_dbs: []

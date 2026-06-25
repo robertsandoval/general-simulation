@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llamastack
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llamastack.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "llamastack.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "llamastack.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Force a rollout when the run config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: llamastack
+          image: {{ .Values.image }}
+          imagePullPolicy: Always
+          args:
+            - llama
+            - stack
+            - run
+            - /etc/llamastack/run.yaml
+            - --port
+            - "8321"
+          ports:
+            - name: http
+              containerPort: 8321
+              protocol: TCP
+          env:
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llamastack-secrets
+                  key: PGVECTOR_PASSWORD
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8321
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8321
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 4
+          volumeMounts:
+            - name: run-config
+              mountPath: /etc/llamastack
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run-config
+          configMap:
+            name: llamastack-run-config
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,19 @@
+# ClusterRoleBinding — grants the postgres-sa ServiceAccount the anyuid SCC
+# so the container can run as UID 999 (the postgres user).
+#
+# Requires cluster-admin or a role with ClusterRoleBinding create rights.
+# The Makefile runs this as part of 'make deploy-postgres'.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-postgres-anyuid
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: postgres-sa
+    namespace: {{ .Release.Namespace }}

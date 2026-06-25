@@ -1,0 +1,9 @@
+apiVersion: v2
+name: llamastack
+description: >
+  Llama Stack server for the General Simulation Platform.
+  Provides unified inference, vector search (pgvector), and tool-calling
+  APIs consumed by the FastAPI reasoning pipeline.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

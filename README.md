@@ -272,168 +272,157 @@ Set `USE_FAKE_LLAMA_STACK=true` in `.env`.  `FakeLlamaStackClient` provides:
 
 ## OpenShift Deployment
 
-All manifests live under `deploy/openshift/`.  Follow the steps below in order;
-each step must succeed before the next one starts.
+Deployment is driven by a **Makefile** that wraps `podman build/push` for
+images and **Helm** for all Kubernetes resources.  Each component has its own
+Helm chart under `deploy/helm/` so components can be upgraded independently.
 
 ### Prerequisites
 
 | Requirement | Notes |
 |---|---|
 | OpenShift 4.13+ | Tested against OCP 4.14/4.15 |
-| `oc` CLI logged in | `oc login ...` with a role that can create Deployments, StatefulSets, Services, Routes, Jobs, CronJobs, Secrets, ConfigMaps, and ServiceAccounts |
-| GPU nodes | Required for vLLM only; CPU nodes sufficient for everything else |
+| `oc` CLI logged in | `oc login ...` — needs cluster-admin (or a role covering Deployments, StatefulSets, Services, Routes, Jobs, CronJobs, Secrets, ConfigMaps, ServiceAccounts, and ClusterRoleBindings) |
+| `helm` 3.x | [Install Helm](https://helm.sh/docs/intro/install/) |
+| `podman` | To build and push images |
+| GPU nodes | Required for vLLM only; CPU nodes are sufficient for everything else |
 | NVIDIA GPU Operator | Install via OperatorHub if using the plain vLLM Deployment |
-| (Optional) Red Hat OpenShift AI | Required only for the KServe `InferenceService` vLLM path |
-| Podman / Docker | To build and push images |
+| (Optional) Red Hat OpenShift AI | Only needed for the KServe `InferenceService` vLLM path |
 
 No additional operators are required. Postgres runs as a plain StatefulSet.
 
 ---
 
-### Step 1 — Create the namespace
+### Quick start — full deploy
 
 ```bash
-oc apply -f deploy/openshift/namespace.yaml
-oc project general-sim
+# 1. Log in to quay.io so podman can push images
+podman login quay.io
+
+# 2. Build and push all three container images
+make build
+
+# 3. Deploy every component in dependency order
+#    PG_PASSWORD is injected via --set; never stored in values files.
+make deploy PG_PASSWORD=<your-password>
+```
+
+`make deploy` runs the six steps below in order, waiting for each to be healthy
+before proceeding.
+
+---
+
+### Helm chart overview
+
+| Chart | Path | Key resources |
+|---|---|---|
+| `postgres` | `deploy/helm/postgres` | StatefulSet, 2 Services, ServiceAccount, ClusterRoleBinding (anyuid SCC), Secret, ConfigMap (init SQL) |
+| `bootstrap` | `deploy/helm/bootstrap` | Job (Helm post-install/upgrade hook — auto-deleted on success) |
+| `vllm` | `deploy/helm/vllm` | Deployment, Service, PVC (30 Gi) |
+| `llamastack` | `deploy/helm/llamastack` | Deployment, Service, ConfigMap (`run.yaml`), Secret |
+| `api` | `deploy/helm/api` | Deployment (2 replicas), Service, OpenShift Route, ConfigMap, Secret |
+| `ingestion` | `deploy/helm/ingestion` | CronJob (every 10 min, `concurrencyPolicy: Forbid`) |
+
+---
+
+### Step 1 — Build and push container images
+
+```bash
+# Build all images (postgres + app + llamastack) and push to quay.io/robertsandoval/
+make build
+
+# Or build individual images:
+make build-postgres
+make build-app
+make build-llamastack
+```
+
+Override the registry or tag if needed:
+
+```bash
+make build REGISTRY=quay.io/myorg TAG=v1.2.3
 ```
 
 ---
 
-### Step 2 — Apply secrets and ConfigMaps
-
-> **Important:** Replace every `REPLACE_ME` value in `shared/secrets.yaml`
-> before applying.  Never commit real secrets.
+### Step 2 — Deploy Postgres
 
 ```bash
-# Edit secrets first
-vi deploy/openshift/shared/secrets.yaml
-
-oc apply -f deploy/openshift/shared/secrets.yaml
-oc apply -f deploy/openshift/shared/configmaps.yaml
+make deploy-postgres PG_PASSWORD=<your-password>
 ```
 
----
+This installs the `postgres` Helm chart which:
+- Creates the `general-sim` namespace (idempotent)
+- Applies a `ClusterRoleBinding` granting `anyuid` SCC to the `postgres-sa` ServiceAccount (so the container can run as UID 999)
+- Creates the `postgres-credentials` Secret from `--set postgres.password=...`
+- Mounts an init-SQL ConfigMap that enables the `age`, `vector`, and `postgis` extensions on first startup
+- Deploys a StatefulSet with a 10 Gi PVC and readiness/liveness probes
 
-### Step 3 — Build and push images
-
-```bash
-# Log in to the OpenShift internal registry
-oc registry login
-
-# Custom Postgres image (AGE + pgvector + PostGIS)
-podman build \
-  -f deploy/postgres/Containerfile \
-  -t image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest \
-  deploy/postgres
-podman push \
-  image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-postgres:latest
-
-# FastAPI application
-podman build \
-  -f deploy/app/Containerfile \
-  -t image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest \
-  .
-podman push \
-  image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
-
-# Llama Stack distribution image
-llama stack build --config deploy/llamastack/build.yaml
-podman tag distribution-general-sim:dev \
-  image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
-podman push \
-  image-registry.openshift-image-registry.svc:5000/general-sim/llamastack-general-sim:latest
-```
-
----
-
-### Step 4 — Deploy Postgres
+Wait for Postgres to be ready:
 
 ```bash
-# Grant the postgres ServiceAccount permission to run as UID 999
-oc adm policy add-scc-to-user anyuid -z postgres-sa -n general-sim
-
-oc apply -f deploy/openshift/postgres/statefulset.yaml
-
-# Wait until the Pod is running and ready
 oc rollout status statefulset/postgres -n general-sim --timeout=300s
 ```
 
 ---
 
-### Step 5 — Run the schema bootstrap Job
+### Step 3 — Run the schema bootstrap Job
 
 ```bash
-oc apply -f deploy/openshift/bootstrap/job.yaml
-
-oc wait job/general-sim-bootstrap \
-  -n general-sim \
-  --for=condition=complete \
-  --timeout=120s
-
-# Inspect logs if the Job fails
-oc logs job/general-sim-bootstrap -n general-sim
+make deploy-bootstrap PG_PASSWORD=<your-password>
 ```
+
+The `bootstrap` chart deploys a Job as a Helm `post-install,post-upgrade` hook.
+Helm waits for the Job to complete before marking the release successful
+(`--atomic --timeout 3m`).  The Job is deleted automatically on success.
+Re-running `make deploy-bootstrap` is fully idempotent.
 
 ---
 
-### Step 6 — Deploy vLLM
-
-**Option A — Plain Deployment** (works on any GPU-enabled OpenShift):
+### Step 4 — Deploy vLLM
 
 ```bash
-# Edit deployment.yaml to set the correct model path on the PVC
-oc apply -f deploy/openshift/vllm/deployment.yaml
-
-oc rollout status deployment/vllm -n general-sim --timeout=300s
+make deploy-vllm
 ```
 
-**Option B — KServe InferenceService** (requires OpenShift AI / RHOAI):
+Deploys the `vllm` chart (plain Deployment + 30 Gi PVC).  The Deployment
+targets GPU nodes via `nodeSelector: nvidia.com/gpu.present: "true"` and
+runs vLLM with `--enable-auto-tool-choice` and `--tool-call-parser=llama3_json`
+so Llama Stack tool calling works correctly.
+
+> The `--wait --timeout 15m` flag is used here because the GPU pod may take
+> several minutes to pull the model weights on first start.
+
+**Alternative — KServe InferenceService** (requires OpenShift AI / RHOAI):
 
 ```bash
-# Edit inferenceservice.yaml to set storageUri and confirm the ServingRuntime name
 oc apply -f deploy/openshift/vllm/inferenceservice.yaml
 ```
 
-Verify vLLM is serving before proceeding:
+---
+
+### Step 5 — Deploy Llama Stack
 
 ```bash
-oc exec -n general-sim deployment/vllm -- \
-  curl -s http://localhost:8080/health
+make deploy-llamastack PG_PASSWORD=<your-password>
 ```
 
-> **Reminder:** vLLM must be started with `--enable-auto-tool-choice` and
-> `--tool-call-parser=llama3_json` (or the appropriate parser for your model).
-> Tool calling through Llama Stack will silently fail without these flags.
+Mounts a `run.yaml` ConfigMap that wires `remote::vllm` (inference) and
+`remote::pgvector` (vector store) providers.  The Postgres password is injected
+at runtime via a Secret (`PGVECTOR_PASSWORD` env var referenced by `${env.PGVECTOR_PASSWORD}` in `run.yaml`).
 
 ---
 
-### Step 7 — Deploy Llama Stack
+### Step 6 — Deploy the API and ingestion CronJob
 
 ```bash
-oc apply -f deploy/openshift/llamastack/deployment.yaml
-
-oc rollout status deployment/llamastack -n general-sim --timeout=120s
-
-# Confirm the server started and connected to vLLM + pgvector
-oc logs deployment/llamastack -n general-sim | tail -20
+make deploy-api        PG_PASSWORD=<your-password>
+make deploy-ingestion  PG_PASSWORD=<your-password>
 ```
 
----
+The `api` chart creates 2 replicas with topology spread across nodes and an
+OpenShift Route with TLS edge termination.
 
-### Step 8 — Deploy the API
-
-```bash
-oc apply -f deploy/openshift/api/deployment.yaml
-oc apply -f deploy/openshift/api/service.yaml
-oc apply -f deploy/openshift/api/route.yaml
-
-oc rollout status deployment/general-sim-api -n general-sim --timeout=60s
-
-# Get the external Route URL
-oc get route general-sim-api -n general-sim -o jsonpath='{.spec.host}'
-```
-
-Smoke test:
+Smoke test after deploy:
 
 ```bash
 ROUTE=$(oc get route general-sim-api -n general-sim -o jsonpath='{.spec.host}')
@@ -441,39 +430,66 @@ curl -s https://$ROUTE/health | jq .
 # Expected: {"status": "ok", "db": "reachable"}
 ```
 
----
-
-### Step 9 — Create the ingestion CronJob
+Trigger the ingestion job immediately to verify end-to-end:
 
 ```bash
-oc apply -f deploy/openshift/ingestion/cronjob.yaml
-
-# Trigger a manual run immediately to verify
-oc create job general-sim-ingestion-manual \
+oc create job ingestion-manual \
   --from=cronjob/general-sim-ingestion \
   -n general-sim
 
-oc wait job/general-sim-ingestion-manual \
-  -n general-sim \
-  --for=condition=complete \
-  --timeout=120s
+oc wait job/ingestion-manual \
+  -n general-sim --for=condition=complete --timeout=120s
 ```
 
 ---
 
-### Deploy order summary
+### Per-component upgrades
 
+After changing code or config, rebuild the affected image and upgrade only that
+chart — no need to re-deploy everything:
+
+```bash
+make build-app
+make deploy-api PG_PASSWORD=<your-password>
 ```
-Step 1  namespace.yaml
-Step 2  shared/secrets.yaml + shared/configmaps.yaml
-Step 3  Build & push: general-sim-postgres, general-sim-app, llamastack-general-sim
-Step 4  postgres/statefulset.yaml  →  wait rollout
-Step 5  bootstrap/job.yaml         →  wait complete
-Step 6  vllm/deployment.yaml (or vllm/inferenceservice.yaml)  →  verify /health
-Step 7  llamastack/deployment.yaml  →  verify logs
-Step 8  api/deployment.yaml + api/service.yaml + api/route.yaml  →  smoke-test /health
-Step 9  ingestion/cronjob.yaml  →  trigger manual run
+
+To upgrade a chart's non-secret values, edit `deploy/helm/<chart>/values.yaml`
+and re-run the `make deploy-<chart>` target.  Secrets are always supplied via
+`--set` and are never stored in values files.
+
+---
+
+### Tear-down
+
+```bash
+make undeploy
+# PVCs are NOT deleted automatically — remove manually if needed:
+# oc delete pvc -n general-sim --all
 ```
+
+---
+
+### Makefile reference
+
+```bash
+make help                       # List all targets and variables
+make build                      # Build and push all images
+make deploy PG_PASSWORD=<pw>    # Full ordered deploy
+make status                     # helm list + oc get pods
+make lint-charts                # helm lint all charts
+make undeploy                   # Uninstall all releases
+```
+
+Override defaults on the command line:
+
+| Variable | Default | Description |
+|---|---|---|
+| `REGISTRY` | `quay.io/robertsandoval` | Image registry root |
+| `NAMESPACE` | `general-sim` | Target OpenShift namespace |
+| `TAG` | `latest` | Image tag for all built images |
+| `PG_PASSWORD` | *(none)* | Postgres password — required for deploy targets |
+
+---
 
 ### In-cluster service FQDNs
 
@@ -486,5 +502,6 @@ Step 9  ingestion/cronjob.yaml  →  trigger manual run
 
 ---
 
-See `deploy/openshift/` for the full manifest set and `deploy/app/Containerfile` /
-`deploy/postgres/Containerfile` for the container build instructions.
+Raw Kubernetes manifests (pre-Helm) are preserved under `deploy/openshift/` for
+reference.  The Helm charts under `deploy/helm/` are the authoritative
+deployment path going forward.
