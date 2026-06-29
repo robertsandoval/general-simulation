@@ -4,7 +4,7 @@ image: quay.io/robertsandoval/general-sim-app:latest
 schedule: "*/10 * * * *"
 
 # Adapter to run. Must match an adapter_id registered in src/ingestion/__main__.py.
-adapterId: usgs_earthquakes
+adapterId: opensky_flights
 
 postgres:
   host: postgres.general-sim.svc
@@ -13,14 +13,15 @@ postgres:
   password: ""   # required — pass via --set postgres.password=<pw>
   database: sim
 
-llamastack:
-  url: http://llamastack.general-sim.svc:8321
+llm:
+  baseUrl: "https://api.openai.com/v1"
+  apiKey: ""
+  backend: "openai"
 
 models:
-  generation: meta-llama/Llama-3.1-8B-Instruct
-  embedding: all-MiniLM-L6-v2
-  embeddingDimension: "384"
-  useFakeLlamaStack: "false"
+  generation: gpt-4o-mini
+  embedding: text-embedding-3-small
+  embeddingDimension: "1536"
 
 resources:
   requests:

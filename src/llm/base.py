@@ -1,23 +1,19 @@
-"""Abstract base (Protocol) for the Llama Stack client surface.
+"""Abstract base (Protocol) for LLM client implementations.
 
-Both LlamaStackClient (real) and FakeLlamaStackClient must satisfy this
-interface.  Code outside src/llamastack should only type-hint against this
-Protocol, never against the concrete implementations.
+All concrete clients (OpenAIClient, LlamaStackClient, FakeLLMClient) must
+satisfy this interface.  Code outside src/llm/ should only type-hint against
+this Protocol, never against concrete implementations.
 """
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from src.llamastack.types import Chunk, GenerateResult, Message
+from src.llm.types import Chunk, GenerateResult, Message
 
 
 @runtime_checkable
-class LlamaStackClientBase(Protocol):
-    """Thin surface the app uses for all LLM, embedding, and RAG work.
-
-    Inference and vector/RAG go through the Llama Stack server — never
-    directly to vLLM or pgvector SQL.
-    """
+class LLMClientBase(Protocol):
+    """Thin surface the app uses for all LLM, embedding, and RAG work."""
 
     async def generate(
         self,
@@ -28,17 +24,11 @@ class LlamaStackClientBase(Protocol):
 
         ``tools`` uses the OpenAI function-calling JSON schema shape:
         ``[{"type": "function", "function": {"name": ..., "parameters": ...}}]``.
-        The model may respond with tool_calls instead of (or in addition to)
-        plain content.
         """
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts.
-
-        Returns one vector per input text.  Dimension matches the embedding
-        model registered in Llama Stack (see EMBEDDING_DIMENSION in settings).
-        """
+        """Embed a batch of texts. Returns one vector per input text."""
         ...
 
     async def ingest_documents(
@@ -46,7 +36,7 @@ class LlamaStackClientBase(Protocol):
         documents: list[dict[str, Any]],
         vector_db_id: str,
     ) -> None:
-        """Ingest documents into a Llama Stack vector DB.
+        """Embed and store documents in the named vector collection.
 
         Each document dict must have at least:
           - ``"id"`` (str): unique document identifier
@@ -62,7 +52,7 @@ class LlamaStackClientBase(Protocol):
         vector_db_id: str,
         top_k: int = 5,
     ) -> list[Chunk]:
-        """Semantic search over a Llama Stack vector DB.
+        """Semantic search over the named vector collection.
 
         Returns up to ``top_k`` chunks ranked by relevance.
         """
@@ -73,17 +63,16 @@ class LlamaStackClientBase(Protocol):
         vector_db_id: str,
         provider_id: str | None = None,
     ) -> None:
-        """Register the vector DB if it does not already exist.
+        """Create the vector collection if it does not already exist.
 
-        Idempotent — safe to call before every ingest or search.  The
-        embedding model and dimension come from Settings.
+        Idempotent — safe to call before every ingest or search.
         """
         ...
 
     async def unregister_vector_db(self, vector_db_id: str) -> None:
-        """Unregister a vector DB and remove all its stored embeddings.
+        """Drop a vector collection and all its stored embeddings.
 
-        Used by ``remove_scenario()`` to fully clean up a scenario's vector
-        data.  Safe to call on a DB that does not exist.
+        Used by ``remove_scenario()`` to fully clean up a scenario's vector data.
+        Safe to call on a collection that does not exist.
         """
         ...

@@ -1,8 +1,8 @@
-"""FakeLlamaStackClient — in-memory stub for tests and GPU-free dev.
+"""FakeLLMClient — in-memory stub for tests and GPU-free dev.
 
-Activated by setting USE_FAKE_LLAMA_STACK=true in the environment (or .env).
+Activated by setting LLM_BACKEND=fake in the environment (or .env).
 Returns deterministic canned responses so the full reasoning pipeline can be
-exercised without a running Llama Stack server or GPU.
+exercised without a running LLM server or GPU.
 """
 from __future__ import annotations
 
@@ -10,27 +10,26 @@ import math
 from typing import Any
 
 from src.core.config import Settings
-from src.llamastack.types import Chunk, GenerateResult, Message, ToolCall
+from src.llm.types import Chunk, GenerateResult, Message, ToolCall
 
-# Default canned text returned by generate() unless overridden.
 DEFAULT_COMPLETION = (
-    "This is a canned response from FakeLlamaStackClient. "
-    "Replace with a real Llama Stack server for production use."
+    "This is a canned response from FakeLLMClient. "
+    "Set LLM_BACKEND=openai (or llamastack) and configure credentials for real inference."
 )
 
 
-class FakeLlamaStackClient:
-    """Pure-Python drop-in for LlamaStackClient, no network or GPU required.
+class FakeLLMClient:
+    """Pure-Python drop-in for OpenAIClient, no network or GPU required.
 
     Vector store is backed by an in-memory dict keyed by vector_db_id.
-    Similarity scoring uses simple cosine similarity on fake embeddings so
-    vector_search returns sensible ranked results from documents previously
-    ingested via ingest_documents.
+    Similarity scoring uses cosine similarity on fake embeddings so
+    vector_search returns sensible ranked results from previously ingested docs.
     """
 
     def __init__(
         self,
         settings: Settings,
+        pool: Any = None,
         canned_completion: str = DEFAULT_COMPLETION,
         canned_tool_calls: list[ToolCall] | None = None,
     ) -> None:
@@ -39,8 +38,6 @@ class FakeLlamaStackClient:
         self._canned_tool_calls: list[ToolCall] = canned_tool_calls or []
         # {vector_db_id: list[{"id", "content", "metadata", "embedding"}]}
         self._store: dict[str, list[dict[str, Any]]] = {}
-
-    # ── Public interface ──────────────────────────────────────────────────────
 
     async def generate(
         self,
@@ -114,7 +111,6 @@ class FakeLlamaStackClient:
         self._store.setdefault(vector_db_id, [])
 
     async def unregister_vector_db(self, vector_db_id: str) -> None:
-        """Remove the vector DB and all its stored documents."""
         self._store.pop(vector_db_id, None)
 
 
@@ -124,16 +120,14 @@ class FakeLlamaStackClient:
 def _hash_embed(text: str, dim: int) -> list[float]:
     """Deterministic unit vector seeded by the hash of *text*.
 
-    Not a real embedding — just a reproducible vector for testing that
-    gives distinct, stable representations for distinct inputs.
+    Not a real embedding — reproducible vector for testing that gives
+    distinct, stable representations for distinct inputs.
     """
     seed = hash(text) & 0xFFFFFFFF
     vec: list[float] = []
     for i in range(dim):
-        # LCG-style sequence to fill the vector dimensions
         seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF
         vec.append((seed / 0xFFFFFFFF) * 2.0 - 1.0)
-    # Normalise to unit length
     mag = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [x / mag for x in vec]
 

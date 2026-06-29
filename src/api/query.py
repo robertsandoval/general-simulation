@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from src.api.deps import get_llm_client, get_pool, get_solver
 from src.core.solver import Solver
-from src.llamastack.base import LlamaStackClientBase
+from src.llm.base import LLMClientBase
 from src.reasoning.pipeline import run_pipeline
 from src.reasoning.types import QueryRequest, QueryResponse
 
@@ -17,7 +17,7 @@ router = APIRouter()
 async def query(
     body: QueryRequest,
     pool: asyncpg.Pool = Depends(get_pool),
-    llm_client: LlamaStackClientBase = Depends(get_llm_client),
+    llm_client: LLMClientBase = Depends(get_llm_client),
     solver: Solver = Depends(get_solver),
 ) -> QueryResponse:
     """Run the three-stage reasoning pipeline for a simulation scenario.

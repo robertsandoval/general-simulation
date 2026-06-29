@@ -1,10 +1,6 @@
-"""Tests for the Llama Stack client layer.
+"""Tests for the LLM client layer.
 
-All tests use FakeLlamaStackClient — no live Llama Stack server or GPU needed.
-The "done when" checks from the build plan:
-  - embed() returns vectors of the configured dimension
-  - vector_search() returns hits from documents ingested via ingest_documents()
-  - generate() round-trips a tool-call request/response shape
+All tests use FakeLLMClient — no live LLM server or GPU needed.
 """
 from __future__ import annotations
 
@@ -13,10 +9,10 @@ import math
 import pytest
 
 from src.core.config import Settings
-from src.llamastack.base import LlamaStackClientBase
-from src.llamastack.fake import FakeLlamaStackClient, _cosine, _hash_embed
-from src.llamastack.factory import get_llama_stack_client
-from src.llamastack.types import Message, ToolCall
+from src.llm.base import LLMClientBase
+from src.llm.fake import FakeLLMClient, _cosine, _hash_embed
+from src.llm.factory import get_llm_client
+from src.llm.types import Message, ToolCall
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -25,30 +21,29 @@ from src.llamastack.types import Message, ToolCall
 def _fake_settings(**overrides) -> Settings:
     base = dict(
         postgres_dsn="postgresql://mock:mock@localhost/mock",
-        llama_stack_base_url="http://localhost:8321",
-        use_fake_llama_stack=True,
-        embedding_dimension=16,  # small for fast tests
+        llm_backend="fake",
+        embedding_dimension=16,
     )
     base.update(overrides)
     return Settings(**base)
 
 
 @pytest.fixture()
-def fake_client() -> FakeLlamaStackClient:
-    return FakeLlamaStackClient(settings=_fake_settings())
+def fake_client() -> FakeLLMClient:
+    return FakeLLMClient(settings=_fake_settings())
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 
-def test_factory_returns_fake_when_flag_set():
-    client = get_llama_stack_client(_fake_settings(use_fake_llama_stack=True))
-    assert isinstance(client, FakeLlamaStackClient)
+def test_factory_returns_fake_when_backend_is_fake():
+    client = get_llm_client(_fake_settings(llm_backend="fake"))
+    assert isinstance(client, FakeLLMClient)
 
 
 def test_factory_satisfies_protocol():
-    client = get_llama_stack_client(_fake_settings(use_fake_llama_stack=True))
-    assert isinstance(client, LlamaStackClientBase)
+    client = get_llm_client(_fake_settings(llm_backend="fake"))
+    assert isinstance(client, LLMClientBase)
 
 
 # ── embed() ───────────────────────────────────────────────────────────────────
@@ -102,7 +97,6 @@ async def test_vector_search_returns_ingested_documents(fake_client):
 
     assert len(results) > 0
     returned_ids = {r.document_id for r in results}
-    # At least one document should be returned
     assert returned_ids.issubset({"doc-1", "doc-2", "doc-3"})
 
 
@@ -140,7 +134,6 @@ async def test_ingest_preserves_metadata(fake_client):
 
 @pytest.mark.asyncio
 async def test_most_similar_document_ranked_first(fake_client):
-    # Ingest two docs; query for the content of doc-A verbatim — it should rank first.
     docs = [
         {"id": "doc-A", "content": "unique phrase alpha beta gamma"},
         {"id": "doc-B", "content": "completely different content here"},
@@ -168,10 +161,6 @@ async def test_generate_returns_content_when_no_tools(fake_client):
 
 @pytest.mark.asyncio
 async def test_generate_round_trips_tool_call_shape():
-    """When canned_tool_calls is set and tools schemas are provided,
-    generate() returns tool_calls and no plain content — matching the
-    end_of_message stop_reason that real models use for tool invocations.
-    """
     canned = [
         ToolCall(
             call_id="call-1",
@@ -179,7 +168,7 @@ async def test_generate_round_trips_tool_call_shape():
             arguments={"entity_id": "E42", "scenario_id": "s1"},
         )
     ]
-    client = FakeLlamaStackClient(
+    client = FakeLLMClient(
         settings=_fake_settings(),
         canned_tool_calls=canned,
     )

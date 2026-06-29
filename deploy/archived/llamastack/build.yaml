@@ -16,7 +16,8 @@
 # swap the embedding provider to inline::sentence-transformers below.
 # That adds ~500 MB to the image but eliminates the need for a second vLLM.
 
-name: general-sim
+image_name: general-sim
+image_type: container
 
 distribution_spec:
   description: >-
@@ -29,5 +30,3 @@ distribution_spec:
       # - inline::sentence-transformers
     vector_io:
       - remote::pgvector
-
-  image_type: container

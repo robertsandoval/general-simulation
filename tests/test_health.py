@@ -15,7 +15,6 @@ from src.core.config import Settings
 def _test_settings() -> Settings:
     return Settings(
         postgres_dsn="postgresql://mock:mock@localhost:5432/mock",
-        llama_stack_base_url="http://localhost:8321",
     )
 
 

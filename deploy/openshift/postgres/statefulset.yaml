@@ -77,6 +77,34 @@ spec:
       targetPort: 5432
   type: ClusterIP
 ---
+---
+# NodePort Service — exposes Postgres on a cluster-node port so an external
+# client (psql, DBeaver, DataGrip, etc.) can reach the database directly.
+#
+# Connect from outside the cluster:
+#   psql -h <any-node-IP> -p <nodePort> -U sim -d sim
+#
+# The nodePort defaults to 30432. Change it if that port is already in use.
+# Remove this resource when external access is no longer needed.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-external
+  namespace: general-sim
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: general-sim
+spec:
+  selector:
+    app: postgres
+  type: NodePort
+  ports:
+    - name: postgres-ext
+      port: 5432
+      targetPort: 5432
+      nodePort: 30432
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

@@ -23,8 +23,6 @@ spec:
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: bootstrap
           image: {{ .Values.image }}

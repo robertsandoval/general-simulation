@@ -9,37 +9,44 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # --- Postgres (used directly by /graph and /live) ---
+    # --- Postgres (used directly by /graph, /live, and vector ops) ---
     postgres_dsn: str = Field(
         default="postgresql://sim:sim@localhost:5432/sim",
         description="asyncpg-compatible DSN for the shared Postgres instance.",
     )
 
-    # --- Llama Stack (all inference, embedding, and vector/RAG go here) ---
-    llama_stack_base_url: str = Field(
-        default="http://localhost:8321",
-        description="Base URL of the running Llama Stack server.",
+    # --- LLM backend selector ---
+    llm_backend: str = Field(
+        default="openai",
+        description=(
+            "Which LLM client to use: 'openai' (default, any OpenAI-compatible "
+            "endpoint), 'llamastack' (Llama Stack SDK), or 'fake' (in-memory stub)."
+        ),
     )
 
-    # --- Model identifiers (registered inside Llama Stack's run.yaml) ---
+    # --- Inference endpoint (openai and llamastack backends) ---
+    llm_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description=(
+            "Base URL for the OpenAI-compatible inference endpoint. "
+            "Override to point at Llama Stack: http://llamastack:8321/v1"
+        ),
+    )
+    openai_api_key: str = Field(
+        default="",
+        description="API key for the inference endpoint. Set to any non-empty string for self-hosted endpoints.",
+    )
+
+    # --- Model identifiers ---
     generation_model_id: str = Field(
-        default="meta-llama/Llama-3.1-8B-Instruct",
-        description="Model id for text generation, as registered in Llama Stack.",
+        default="gpt-4o-mini",
+        description="Model ID for chat completion.",
     )
     embedding_model_id: str = Field(
-        default="all-MiniLM-L6-v2",
-        description="Model id for embeddings, as registered in Llama Stack.",
+        default="text-embedding-3-small",
+        description="Model ID for text embeddings.",
     )
     embedding_dimension: int = Field(
-        default=384,
+        default=1536,
         description="Vector dimension of the chosen embedding model.",
-    )
-
-    # --- Runtime mode ---
-    use_fake_llama_stack: bool = Field(
-        default=False,
-        description=(
-            "When True, the app uses FakeLlamaStackClient so the full stack "
-            "runs without a GPU or a live Llama Stack server."
-        ),
     )

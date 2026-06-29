@@ -4,8 +4,8 @@ A **domain-agnostic** simulation and impact-reasoning platform built on:
 
 | Concern | Technology |
 |---|---|
-| Inference & embeddings | [Llama Stack](https://github.com/meta-llama/llama-stack) → vLLM (`remote::vllm`) |
-| Vector / RAG | Llama Stack → pgvector (`remote::pgvector`) |
+| Inference & embeddings | OpenAI-compatible endpoint (OpenAI by default; point at vLLM / Llama Stack via `LLM_BASE_URL`) |
+| Vector / RAG | pgvector (queried directly via asyncpg) |
 | Dependency graph | Apache AGE (Cypher), queried directly |
 | Live / geo snapshot | PostGIS, queried directly |
 | API | FastAPI |
@@ -28,7 +28,7 @@ A **domain-agnostic** simulation and impact-reasoning platform built on:
 - [Repository layout](#repository-layout)
 - [Quickstart (local dev)](#quickstart-local-dev)
 - [Running without hardware (CI / dev laptops)](#running-without-hardware-ci--dev-laptops)
-- [Llama Stack — setup notes](#llama-stack--setup-notes)
+- [LLM backend configuration](#llm-backend-configuration)
 - [OpenShift Deployment](#openshift-deployment)
 
 ---
@@ -47,11 +47,11 @@ The whole platform is built to run on **OpenShift**, which is a hard constraint 
 
 ## System at a glance
 
-The platform is a small number of cooperating layers running inside one OpenShift cluster. The diagram below shows how they stack: an API and an orchestrator at the top, the three reasoning stages beneath, Llama Stack as the unified service backend, and a single Postgres instance holding all state. Two things are worth noticing immediately — the reasoning stages are colour-coded by whether they use the LLM, and the graph/geo path bypasses Llama Stack to talk to Postgres directly.
+The platform is a small number of cooperating layers running inside one OpenShift cluster. The diagram below shows how they stack: an API and an orchestrator at the top, the three reasoning stages beneath, the LLM client as the inference/vector backend, and a single Postgres instance holding all state. Two things are worth noticing immediately — the reasoning stages are colour-coded by whether they use the LLM, and the graph/geo path bypasses the LLM client to talk to Postgres directly.
 
 ![Layered system overview](docs/images/architecture-overview.png)
 
-*Figure 1 — Layered system overview. Everything runs inside OpenShift. Llama Stack fronts inference and vector/RAG; graph (AGE) and live/geo (PostGIS) are queried directly because no Llama Stack provider exists for them.*
+*Figure 1 — Layered system overview. Everything runs inside OpenShift. The LLM client fronts inference and vector/RAG; graph (AGE) and live/geo (PostGIS) are queried directly.*
 
 The remaining sections walk through each component: what it is, why it is there, and how it relates to its neighbours.
 
@@ -61,19 +61,27 @@ The remaining sections walk through each component: what it is, why it is there,
 
 ### OpenShift — the platform
 
-OpenShift is the deployment substrate and a fixed requirement, not an interchangeable choice. Every other component is selected partly because it runs cleanly on OpenShift: Postgres via an operator, vLLM via OpenShift AI / KServe, Llama Stack via its operator, and the application services as ordinary Deployments and CronJobs. Treating OpenShift as the constant is what lets the rest of the stack stay portable across domains.
+OpenShift is the deployment substrate and a fixed requirement, not an interchangeable choice. Every other component is selected partly because it runs cleanly on OpenShift: Postgres via an operator, vLLM via OpenShift AI / KServe, and the application services as ordinary Deployments and CronJobs. Treating OpenShift as the constant is what lets the rest of the stack stay portable across domains.
 
-### vLLM — local inference
+### vLLM — local inference (optional)
 
-vLLM serves the open-weight language model locally on GPU, so inference stays inside your cluster rather than calling an external API. It exposes an OpenAI-compatible interface, which is what allows it to sit behind Llama Stack as a standard provider. The single hard requirement on the model is that it must support **structured tool calling**, since the reasoning layer depends on it; in practice this also means starting vLLM with tool-calling enabled. This is one of the two main technical risks in the build.
+vLLM serves an open-weight language model locally on GPU, keeping inference inside your cluster. It exposes an OpenAI-compatible `/v1` interface. To use it, set `LLM_BASE_URL=http://vllm.general-sim.svc:8080/v1`. The model must support **structured tool calling** if you use the tool-calling path.
 
-### Llama Stack — the unified service backend
+### LLM client — the inference and RAG backend
 
-Llama Stack is a single API server with a swappable-provider architecture. It is the most consequential component in the design because it collapses three things that would otherwise be hand-written code into provider configuration: **inference** (a `remote::vllm` provider pointing at vLLM), **vector/RAG** (a `remote::pgvector` provider pointing at Postgres), and a **tool runtime** (where the ingestion adapters and the solver are registered as callable tools).
+The app talks to any OpenAI-compatible inference endpoint through `src/llm/openai_client.py`. Switching providers is a configuration change, not a code change:
 
-The important boundary to understand is what Llama Stack does **not** cover. There is no Llama Stack provider for graph traversal (Apache AGE) or for geospatial queries (PostGIS). Those remain the application’s own direct-to-Postgres code. So Llama Stack is the front door for inference, embeddings, vector search, and tools — but the deterministic graph and geo work sits beside it, not behind it.
+| Provider | `LLM_BASE_URL` | `LLM_BACKEND` |
+|---|---|---|
+| OpenAI (default) | `https://api.openai.com/v1` | `openai` |
+| vLLM (self-hosted) | `http://vllm.svc:8080/v1` | `openai` |
+| Llama Stack `/v1` | `http://llamastack.svc:8321/v1` | `openai` |
+| Llama Stack SDK | `http://llamastack.svc:8321` | `llamastack` |
+| Tests / no GPU | *(any)* | `fake` |
 
-> **Design rule:** Application code goes through the Llama Stack client (`src/llamastack`) for anything involving the model, embeddings, vector search, or registered tools — never calling vLLM or pgvector directly. The sole exceptions are graph (AGE) and live/geo (PostGIS), which have no provider and are queried directly.
+Vector/RAG operations (embed, ingest, search) go directly to **pgvector** via asyncpg — no intermediate server required. A single `llm_embeddings` table in Postgres stores all collections.
+
+> **Design rule:** Application code goes through `LLMClientBase` (`src/llm/`) for anything involving the model, embeddings, or vector search — never calling any inference API or pgvector SQL directly. The sole exceptions are graph (AGE) and live/geo (PostGIS), which are queried directly.
 
 ### PostgreSQL — one database, three jobs
 
@@ -82,7 +90,7 @@ A single Postgres instance carries all persistent state through three extensions
 | Extension | Role | Accessed via |
 |---|---|---|
 | **Apache AGE** | Property graph with openCypher. Holds the dependency graph and simulation-event overlays. Powers Stage 1. | Directly (no LS provider) |
-| **pgvector** | Embeddings and RAG. Stores simulation-event narratives, playbooks, and precedent for retrieval. | Llama Stack vector provider |
+| **pgvector** | Embeddings and RAG. Stores simulation-event narratives, playbooks, and precedent for retrieval. | Directly via asyncpg |
 | **PostGIS** | The live “current situation” snapshot — entity positions, states, geospatial data — written by ingestion. | Directly (no LS provider) |
 
 Building a single custom Postgres image that bundles all three extensions is the **second main risk** in the build, and the plan front-loads it for that reason.
@@ -91,7 +99,7 @@ Building a single custom Postgres image that bundles all three extensions is the
 
 Ingestion adapters pull from external sources and normalise whatever they return into a single **canonical schema** (id, type, optional geometry, timestamp, status, and a free-form attributes field). Each adapter knows one source; the normalisation step is what keeps the rest of the system source-agnostic. Adapters write **only** into the PostGIS live snapshot — they establish ground truth and never touch the simulation overlay.
 
-Each adapter runs two ways: as a scheduled OpenShift CronJob for steady polling, and as an on-demand callable that is also registered as a Llama Stack tool, so the reasoning agent can trigger a fresh pull mid-query when it needs current data.
+Each adapter runs two ways: as a scheduled OpenShift CronJob for steady polling, and as an on-demand callable that the reasoning agent can trigger mid-query when it needs current data.
 
 ### The reasoning orchestrator and its three stages
 
@@ -131,7 +139,7 @@ This is what makes multiple concurrent what-if scenarios trivial — each is an 
 
 ## Why the same design serves multiple domains
 
-The platform is best understood as a domain-agnostic skeleton with four well-defined swap points. The skeleton — OpenShift, Llama Stack, vLLM, Postgres, the three-stage pipeline, and the overlay mechanism — stays identical. Only four seams change when you move from supply chain to manufacturing.
+The platform is best understood as a domain-agnostic skeleton with four well-defined swap points. The skeleton — OpenShift, vLLM (optional), Postgres, the three-stage pipeline, and the overlay mechanism — stays identical. Only four seams change when you move from supply chain to manufacturing.
 
 ![Fixed core vs. swap seams](docs/images/domain-seams.png)
 
@@ -155,8 +163,8 @@ A manufacturing note worth flagging: plant sensor data is far higher-frequency t
 
 1. **One custom Postgres image** bundling AGE + pgvector + PostGIS is the linchpin; extension compatibility is the main setup risk, so build and test it first.
 2. **The vLLM model must support structured tool calling**, with tool-calling enabled at serve time — validate this before committing, since the reasoning layer depends on it.
-3. **Keep the orchestrator separate from Llama Stack’s agent loop.** The deterministic stages must not be forced into a generative agent loop.
-4. **Graph and geo stay direct-to-Postgres.** Don’t expect Llama Stack to be a single front door for all state — it owns inference, vector, and tools only.
+3. **Keep the orchestrator separate from any generative agent loop.** The deterministic stages must not be forced into a generative agent loop.
+4. **Graph and geo stay direct-to-Postgres.** The LLM client owns inference, embeddings, and vector search only — it is not a front door for all state.
 5. **Live data and simulation knowledge stay separate.** The overlay must never mutate ground truth; this is what enables concurrent, reversible what-if scenarios.
 
 > In short: a fixed OpenShift-native skeleton handles platform, inference, storage, and reasoning identically across domains, while four narrow seams — ingestion, graph schema, solver, and RAG context — are all that change to retarget it from supply chains to manufacturing plants.
@@ -173,7 +181,7 @@ src/
   live/        # PostGIS live snapshot store — direct to Postgres
   reasoning/   # 3-stage pipeline: traversal → solver → synthesis
   solver/      # Pluggable quantitative solver interface + stub impl
-  llamastack/  # Llama Stack client wrapper + run.yaml provider config
+  llm/         # LLM client: OpenAI-compatible inference + direct pgvector RAG
   api/         # FastAPI entrypoint
 deploy/        # Containerfiles, OpenShift manifests, LlamaStackDistribution CR
 tests/
@@ -217,58 +225,63 @@ uv run pytest
 
 ## Running without hardware (CI / dev laptops)
 
-Set `USE_FAKE_LLAMA_STACK=true` in `.env` (or the environment).  This swaps in
-`FakeLlamaStackClient` which returns canned completions, embeddings, and vector
+Set `LLM_BACKEND=fake` in `.env` (or the environment).  This swaps in
+`FakeLLMClient` which returns canned completions, embeddings, and vector
 search hits, so the full reasoning pipeline can be exercised in tests without a
 GPU or a running Llama Stack server.
 
 ---
 
-## Llama Stack — setup notes
+## LLM backend configuration
 
-### vLLM tool-calling requirement
+The app uses any OpenAI-compatible inference endpoint. The backend is selected
+by the `LLM_BACKEND` environment variable.
 
-vLLM **must** be started with `--enable-auto-tool-choice` and a matching
-`--tool-call-parser` for structured tool calls to work through Llama Stack:
+### Pointing at a self-hosted vLLM for local dev
+
+1. Start vLLM locally with tool-calling enabled:
 
 ```bash
 vllm serve meta-llama/Llama-3.1-8B-Instruct \
     --enable-auto-tool-choice \
-    --tool-call-parser hermes   # or: llama3_json, mistral, internlm2
+    --tool-call-parser hermes
 ```
 
-The correct parser depends on the model family.  Without this flag, tool calls
-will fail silently or produce plain-text invocations that Llama Stack cannot
-parse.
-
-> **Key risk:** the generation model must support *structured* tool calling with
-> a JSON schema.  Llama-3 8B/70B Instruct, Mistral Instruct v0.3+, and Hermes
-> variants are known to work.  Base (non-Instruct) models and many fine-tunes
-> do **not**.
-
-### Pointing run.yaml at a local vLLM for dev
-
-1. Start vLLM locally (with the flags above).
-2. Set `VLLM_URL=http://localhost:8080` and `PGVECTOR_*` vars matching your
-   compose Postgres.
-3. Run the Llama Stack server:
+2. Set in `.env`:
 
 ```bash
-llama stack build --config deploy/llamastack/build.yaml
-llama stack run deploy/llamastack/run.yaml
+LLM_BASE_URL=http://localhost:8080/v1
+OPENAI_API_KEY=unused
+LLM_BACKEND=openai
+GENERATION_MODEL_ID=meta-llama/Llama-3.1-8B-Instruct
+EMBEDDING_MODEL_ID=all-MiniLM-L6-v2
+EMBEDDING_DIMENSION=384
 ```
 
-The app's `LLAMA_STACK_BASE_URL` should point at this server (default
-`http://localhost:8321`).
+### Pointing at Llama Stack (future)
 
-### Using the fake client (no GPU, no Llama Stack server)
+Llama Stack exposes an OpenAI-compatible `/v1` endpoint. No code change needed:
 
-Set `USE_FAKE_LLAMA_STACK=true` in `.env`.  `FakeLlamaStackClient` provides:
+```bash
+LLM_BASE_URL=http://llamastack:8321/v1
+OPENAI_API_KEY=unused
+LLM_BACKEND=openai
+```
+
+Archived Llama Stack Helm chart and build configs are preserved under
+`deploy/archived/` if you want to bring it back as a sidecar.
+
+### Running without a GPU (CI / dev laptops)
+
+Set `LLM_BACKEND=fake` in `.env`. `FakeLLMClient` provides:
 - Deterministic embeddings (hash-seeded unit vectors, correct dimension)
 - In-memory vector store (ingest then search, cosine similarity)
 - Canned generation responses (configurable tool-call shape for pipeline tests)
 
----
+```bash
+LLM_BACKEND=fake
+```
+
 
 ## OpenShift Deployment
 
@@ -318,7 +331,7 @@ before proceeding.
 | `postgres` | `deploy/helm/postgres` | StatefulSet, 2 Services, ServiceAccount, ClusterRoleBinding (anyuid SCC), Secret, ConfigMap (init SQL) |
 | `bootstrap` | `deploy/helm/bootstrap` | Job (Helm post-install/upgrade hook — auto-deleted on success) |
 | `vllm` | `deploy/helm/vllm` | Deployment, Service, PVC (30 Gi) |
-| `llamastack` | `deploy/helm/llamastack` | Deployment, Service, ConfigMap (`run.yaml`), Secret |
+| `llamastack` | `deploy/archived/llamastack-helm` | (archived — see `deploy/archived/` to restore) |
 | `api` | `deploy/helm/api` | Deployment (2 replicas), Service, OpenShift Route, ConfigMap, Secret |
 | `ingestion` | `deploy/helm/ingestion` | CronJob (every 10 min, `concurrencyPolicy: Forbid`) |
 
@@ -333,7 +346,6 @@ make build
 # Or build individual images:
 make build-postgres
 make build-app
-make build-llamastack
 ```
 
 Override the registry or tag if needed:
@@ -400,24 +412,19 @@ oc apply -f deploy/openshift/vllm/inferenceservice.yaml
 
 ---
 
-### Step 5 — Deploy Llama Stack
+### Step 5 — Deploy the API and ingestion CronJob
 
 ```bash
-make deploy-llamastack PG_PASSWORD=<your-password>
+make deploy-api        PG_PASSWORD=<your-password> OPENAI_API_KEY=<your-key>
+make deploy-ingestion  PG_PASSWORD=<your-password> OPENAI_API_KEY=<your-key>
 ```
 
-Mounts a `run.yaml` ConfigMap that wires `remote::vllm` (inference) and
-`remote::pgvector` (vector store) providers.  The Postgres password is injected
-at runtime via a Secret (`PGVECTOR_PASSWORD` env var referenced by `${env.PGVECTOR_PASSWORD}` in `run.yaml`).
+The `api` chart creates 2 replicas with topology spread across nodes and an
+OpenShift Route with TLS edge termination.
 
 ---
 
-### Step 6 — Deploy the API and ingestion CronJob
 
-```bash
-make deploy-api        PG_PASSWORD=<your-password>
-make deploy-ingestion  PG_PASSWORD=<your-password>
-```
 
 The `api` chart creates 2 replicas with topology spread across nodes and an
 OpenShift Route with TLS edge termination.
@@ -488,6 +495,7 @@ Override defaults on the command line:
 | `NAMESPACE` | `general-sim` | Target OpenShift namespace |
 | `TAG` | `latest` | Image tag for all built images |
 | `PG_PASSWORD` | *(none)* | Postgres password — required for deploy targets |
+| `OPENAI_API_KEY` | *(none)* | API key for the inference endpoint |
 
 ---
 
@@ -497,7 +505,6 @@ Override defaults on the command line:
 |---|---|
 | Postgres | `postgres.general-sim.svc:5432` |
 | vLLM | `http://vllm.general-sim.svc:8080` |
-| Llama Stack | `http://llamastack.general-sim.svc:8321` |
 | API | `http://general-sim-api.general-sim.svc:8000` |
 
 ---

@@ -1,8 +1,8 @@
-"""Shared domain types for the Llama Stack client surface.
+"""Shared domain types for the LLM client surface.
 
-These are thin, SDK-agnostic data classes.  The real LlamaStackClient wrapper
-converts between these and the llama-stack-client SDK types internally, so the
-rest of the app never imports from llama_stack_client directly.
+These are thin, backend-agnostic data classes.  Concrete client implementations
+convert between these and their SDK-specific types internally, so the rest of
+the app never imports from any LLM SDK directly.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class ToolCall:
 
 @dataclass
 class GenerateResult:
-    """Result of a single inference.chat_completion call."""
+    """Result of a single chat completion call."""
 
     content: str | None
     tool_calls: list[ToolCall] = field(default_factory=list)

@@ -23,3 +23,13 @@ resources:
   limits:
     memory: 2Gi
     cpu: "1"
+
+# External access via NodePort — disabled by default.
+# Enable to expose Postgres on a cluster-node port so external clients
+# (psql, DBeaver, DataGrip, etc.) can connect directly.
+#
+# Connect from outside the cluster:
+#   psql -h <any-node-IP> -p <nodePort> -U sim -d sim
+externalAccess:
+  enabled: false
+  nodePort: 30432

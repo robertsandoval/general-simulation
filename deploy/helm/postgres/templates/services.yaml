@@ -16,6 +16,28 @@ spec:
       port: 5432
       targetPort: 5432
 ---
+# NodePort Service — opt-in external access for Postgres clients.
+# Enable with: --set externalAccess.enabled=true
+# Connect: psql -h <node-IP> -p {{ .Values.externalAccess.nodePort }} -U sim -d sim
+{{- if .Values.externalAccess.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-external
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "postgres.selectorLabels" . | nindent 4 }}
+  type: NodePort
+  ports:
+    - name: postgres-ext
+      port: 5432
+      targetPort: 5432
+      nodePort: {{ .Values.externalAccess.nodePort }}
+{{- end }}
+---
 # ClusterIP Service — stable in-cluster endpoint used by all clients.
 # Hostname: postgres.{{ .Release.Namespace }}.svc
 apiVersion: v1

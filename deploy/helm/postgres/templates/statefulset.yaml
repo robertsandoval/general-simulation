@@ -18,15 +18,23 @@ spec:
     spec:
       serviceAccountName: postgres-sa
       securityContext:
-        fsGroup: 999
+        # Run as UID 999 (the postgres user in the image) so the entrypoint
+        # skips its root-only "find ... chown" block.  That block is not
+        # suppressed with || : and fails on storage backends that use NFS
+        # root_squash or similar root-remapping policies.
+        # anyuid SCC (bound via scc-binding.yaml) is required to allow UID 999.
+        runAsUser: 999
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        fsGroup: 999
       containers:
         - name: postgres
           image: {{ .Values.image }}
           imagePullPolicy: Always
-          command:
+          # args replaces Docker CMD; the ENTRYPOINT (docker-entrypoint.sh) still
+          # runs and uses gosu to drop from root to the postgres user before
+          # exec-ing the server.  Using command: here would bypass that drop
+          # and cause "root execution is not permitted" from the postgres binary.
+          args:
             - postgres
             - -c
             - shared_preload_libraries=age

@@ -27,8 +27,6 @@ spec:
               {{- include "api.selectorLabels" . | nindent 14 }}
       securityContext:
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: api
           image: {{ .Values.image }}
@@ -45,7 +43,6 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
-            runAsUser: 1001
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:

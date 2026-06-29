@@ -21,6 +21,7 @@ import sys
 
 from src.core.config import Settings
 from src.core.db import create_pool
+from src.ingestion.adapters.opensky_flights import OpenSkyFlightsAdapter
 from src.ingestion.adapters.usgs_earthquakes import USGSEarthquakeAdapter
 from src.ingestion.runner import run_ingestion
 
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _ADAPTERS = {
     "usgs_earthquakes": USGSEarthquakeAdapter,
+    "opensky_flights": OpenSkyFlightsAdapter,
 }
 
 
@@ -37,7 +39,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--adapter",
-        default="usgs_earthquakes",
+        default="opensky_flights",
         choices=list(_ADAPTERS),
         help="Adapter to run (default: usgs_earthquakes).",
     )

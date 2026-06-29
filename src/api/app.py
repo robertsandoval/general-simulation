@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialise shared resources on startup; clean up on shutdown."""
     from src.core.config import Settings
     from src.core.db import create_pool
-    from src.llamastack.factory import get_llama_stack_client
+    from src.llm.factory import get_llm_client
     from src.solver.stub import StubSolver
 
     settings = Settings()
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Could not create DB pool at startup: %s", exc)
 
     app.state.pool = pool
-    app.state.llm_client = get_llama_stack_client(settings)
+    app.state.llm_client = get_llm_client(settings, pool)
     app.state.solver = StubSolver()
 
     yield

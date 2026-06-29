@@ -1,8 +1,15 @@
-"""Real Llama Stack client — wraps the llama-stack-client SDK.
+"""Llama Stack client — wraps the llama-stack-client SDK.
 
-This is the only file in the project that imports from llama_stack_client.
-All LLM, embedding, and vector/RAG calls in the app go through this wrapper
-(or FakeLlamaStackClient for tests), never directly to vLLM or pgvector SQL.
+This backend is dormant by default.  Activate it by setting:
+    LLM_BACKEND=llamastack
+
+and ensuring the llama-stack-client package is installed:
+    pip install llama-stack-client
+
+The Llama Stack server exposes an OpenAI-compatible /v1 endpoint, so you can
+also keep LLM_BACKEND=openai and simply point LLM_BASE_URL at the Llama Stack
+server — this avoids the dependency entirely.  Use LLM_BACKEND=llamastack only
+if you need Llama Stack-specific vector_io / RAG APIs.
 """
 from __future__ import annotations
 
@@ -17,43 +24,27 @@ from llama_stack_client.types import (
 )
 
 from src.core.config import Settings
-from src.llamastack.types import Chunk, GenerateResult, Message, ToolCall
+from src.llm.types import Chunk, GenerateResult, Message, ToolCall
 
 logger = logging.getLogger(__name__)
 
-# Key used to stash the document_id inside a chunk's metadata dict.
-# Llama Stack's vector_io API has no separate document_id field; we encode it
-# in metadata at ingest time and decode it at query time.
 _DOC_ID_META_KEY = "_sim_document_id"
 
 
 class LlamaStackClient:
-    """Thin async wrapper around AsyncLlamaStackClient.
+    """Thin async wrapper around the llama-stack-client SDK."""
 
-    Exposes only the four operations the app needs:
-      generate / embed / ingest_documents / vector_search
-    and translates between our internal types and the SDK types.
-    """
-
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, pool: Any = None) -> None:
         self._settings = settings
-        self._sdk = AsyncLlamaStackClient(
-            base_url=settings.llama_stack_base_url,
-        )
-        # Track which vector DBs we have already (tried to) register so we
-        # don't hammer the server on every call.
+        self._sdk = AsyncLlamaStackClient(base_url=settings.llm_base_url)
         self._registered_dbs: set[str] = set()
-
-    # ── Public interface ──────────────────────────────────────────────────────
 
     async def generate(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
     ) -> GenerateResult:
-        sdk_messages = [
-            {"role": m.role, "content": m.content} for m in messages
-        ]
+        sdk_messages = [{"role": m.role, "content": m.content} for m in messages]
         response: ChatCompletionResponse = (
             await self._sdk.inference.chat_completion(
                 model_id=self._settings.generation_model_id,
@@ -62,20 +53,14 @@ class LlamaStackClient:
             )
         )
         msg = response.completion_message
-        content: str | None = (
-            msg.content if isinstance(msg.content, str) else None
-        )
+        content: str | None = msg.content if isinstance(msg.content, str) else None
         tool_calls: list[ToolCall] = []
         if msg.tool_calls:
             tool_calls = [
                 ToolCall(
                     call_id=tc.call_id,
                     tool_name=str(tc.tool_name),
-                    arguments=(
-                        tc.arguments
-                        if isinstance(tc.arguments, dict)
-                        else {}
-                    ),
+                    arguments=tc.arguments if isinstance(tc.arguments, dict) else {},
                 )
                 for tc in msg.tool_calls
             ]
@@ -114,11 +99,6 @@ class LlamaStackClient:
             vector_db_id=vector_db_id,
             chunks=chunks,  # type: ignore[arg-type]
         )
-        logger.debug(
-            "Ingested %d documents into vector DB '%s'",
-            len(documents),
-            vector_db_id,
-        )
 
     async def vector_search(
         self,
@@ -136,33 +116,16 @@ class LlamaStackClient:
             meta: dict[str, Any] = dict(chunk.metadata)
             doc_id = str(meta.pop(_DOC_ID_META_KEY, "unknown"))
             content = chunk.content if isinstance(chunk.content, str) else ""
-            results.append(Chunk(
-                document_id=doc_id,
-                content=content,
-                score=score,
-                metadata=meta,
-            ))
-        return results
-
-    async def unregister_vector_db(self, vector_db_id: str) -> None:
-        """Unregister a vector DB via Llama Stack, removing all its embeddings."""
-        try:
-            await self._sdk.vector_dbs.unregister(vector_db_id=vector_db_id)
-            logger.debug("Unregistered vector DB '%s'", vector_db_id)
-        except Exception as exc:
-            logger.debug(
-                "vector_dbs.unregister for '%s' raised %s (may not exist)",
-                vector_db_id,
-                exc,
+            results.append(
+                Chunk(document_id=doc_id, content=content, score=score, metadata=meta)
             )
-        self._registered_dbs.discard(vector_db_id)
+        return results
 
     async def ensure_vector_db(
         self,
         vector_db_id: str,
         provider_id: str | None = None,
     ) -> None:
-        """Register the vector DB with Llama Stack if not already known."""
         if vector_db_id in self._registered_dbs:
             return
         try:
@@ -172,12 +135,21 @@ class LlamaStackClient:
                 embedding_dimension=self._settings.embedding_dimension,
                 provider_id=provider_id or "pgvector-store",
             )
-            logger.debug("Registered vector DB '%s'", vector_db_id)
         except Exception as exc:
-            # Server returns 409-like error if already registered — treat as ok.
             logger.debug(
                 "vector_dbs.register for '%s' raised %s (may already exist)",
                 vector_db_id,
                 exc,
             )
         self._registered_dbs.add(vector_db_id)
+
+    async def unregister_vector_db(self, vector_db_id: str) -> None:
+        try:
+            await self._sdk.vector_dbs.unregister(vector_db_id=vector_db_id)
+        except Exception as exc:
+            logger.debug(
+                "vector_dbs.unregister for '%s' raised %s (may not exist)",
+                vector_db_id,
+                exc,
+            )
+        self._registered_dbs.discard(vector_db_id)

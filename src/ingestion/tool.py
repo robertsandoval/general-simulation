@@ -21,6 +21,7 @@ from typing import Any
 
 import asyncpg
 
+from src.ingestion.adapters.opensky_flights import OpenSkyFlightsAdapter
 from src.ingestion.adapters.usgs_earthquakes import USGSEarthquakeAdapter
 from src.ingestion.runner import run_ingestion
 
@@ -47,9 +48,9 @@ INGESTION_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": (
                         "Identifier of the adapter to run.  "
-                        "Currently supported: 'usgs_earthquakes'."
+                        "Supported: 'opensky_flights', 'usgs_earthquakes'."
                     ),
-                    "enum": ["usgs_earthquakes"],
+                    "enum": ["opensky_flights", "usgs_earthquakes"],
                 },
                 "force": {
                     "type": "boolean",
@@ -72,6 +73,7 @@ INGESTION_TOOL_SCHEMA: dict[str, Any] = {
 # Registry maps adapter_id → adapter factory.
 # Add new adapters here — the tool callable and schema stay unchanged.
 _ADAPTER_REGISTRY: dict[str, Any] = {
+    "opensky_flights": OpenSkyFlightsAdapter,
     "usgs_earthquakes": USGSEarthquakeAdapter,
 }
 

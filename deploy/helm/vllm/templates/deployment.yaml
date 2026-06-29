@@ -27,8 +27,6 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: vllm
           image: {{ .Values.image }}

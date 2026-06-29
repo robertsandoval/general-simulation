@@ -1,8 +1,8 @@
 """Tests for the graph knowledge store — nodes, edges, and simulation events.
 
-No live database or Llama Stack server required:
+No live database or LLM server required:
   - asyncpg connections are mocked
-  - FakeLlamaStackClient provides the in-memory vector store
+  - FakeLLMClient provides the in-memory vector store
 
 Build-plan "done when" checks:
   - inject_event: AFFECTED_BY edges created in graph + chunk retrievable via
@@ -44,7 +44,7 @@ from src.graph.nodes import (
     delete_entity_node,
     get_dependent_entities,
 )
-from src.llamastack.fake import FakeLlamaStackClient
+from src.llm.fake import FakeLLMClient
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -53,14 +53,13 @@ from src.llamastack.fake import FakeLlamaStackClient
 def _settings() -> Settings:
     return Settings(
         postgres_dsn="postgresql://mock:mock@localhost/mock",
-        llama_stack_base_url="http://localhost:8321",
-        use_fake_llama_stack=True,
+        llm_backend="fake",
         embedding_dimension=16,
     )
 
 
-def _fake_client() -> FakeLlamaStackClient:
-    return FakeLlamaStackClient(settings=_settings())
+def _fake_client() -> FakeLLMClient:
+    return FakeLLMClient(settings=_settings())
 
 
 def _conn() -> AsyncMock:

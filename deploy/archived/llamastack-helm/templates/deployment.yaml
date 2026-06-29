@@ -20,8 +20,6 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: llamastack
           image: {{ .Values.image }}

@@ -32,7 +32,7 @@ from src.graph.cypher import (
     cypher_write_sql,
     parse_agtype_property,
 )
-from src.llamastack.base import LlamaStackClientBase
+from src.llm.base import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class SimulationEvent:
 async def inject_event(
     event: SimulationEvent,
     pool: asyncpg.Pool,
-    llm_client: LlamaStackClientBase,
+    llm_client: LLMClientBase,
 ) -> None:
     """Inject a simulation event as an overlay.
 
@@ -162,7 +162,7 @@ async def remove_event(
 async def remove_scenario(
     scenario_id: str,
     pool: asyncpg.Pool,
-    llm_client: LlamaStackClientBase,
+    llm_client: LLMClientBase,
 ) -> None:
     """Remove ALL events belonging to *scenario_id* — graph and vector store.
 

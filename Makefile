@@ -12,11 +12,9 @@
 # Individual component targets:
 #   make build-postgres           Build and push the custom Postgres image
 #   make build-app                Build and push the FastAPI app image
-#   make build-llamastack         Build and push the Llama Stack image
 #   make deploy-postgres PG_PASSWORD=<pw>
 #   make deploy-bootstrap PG_PASSWORD=<pw>
 #   make deploy-vllm
-#   make deploy-llamastack PG_PASSWORD=<pw>
 #   make deploy-api PG_PASSWORD=<pw>
 #   make deploy-ingestion PG_PASSWORD=<pw>
 #
@@ -27,38 +25,37 @@
 #   PG_PASSWORD Postgres password    (no default — required for deploy targets)
 #
 # Example:
-#   make deploy PG_PASSWORD=s3cr3t
+#   make deploy PG_PASSWORD=s3cr3t OPENAI_API_KEY=sk-...
 #   make build TAG=v1.2.3
 # =============================================================================
 
 # ── Configurable variables ────────────────────────────────────────────────────
-REGISTRY    ?= quay.io/robertsandoval
-NAMESPACE   ?= general-sim
-TAG         ?= latest
-PG_PASSWORD ?=
+REGISTRY       ?= quay.io/robertsandoval
+NAMESPACE      ?= general-sim
+TAG            ?= latest
+PG_PASSWORD    ?=
+OPENAI_API_KEY ?=
 
 # ── Derived image references ──────────────────────────────────────────────────
 IMG_POSTGRES := $(REGISTRY)/general-sim-postgres:$(TAG)
 IMG_APP      := $(REGISTRY)/general-sim-app:$(TAG)
-IMG_LLAMA    := $(REGISTRY)/llamastack-general-sim:$(TAG)
 IMG_VLLM     := docker.io/vllm/vllm-openai:v0.6.3
 
 # ── Helm chart paths ──────────────────────────────────────────────────────────
-CHART_POSTGRES    := deploy/helm/postgres
-CHART_BOOTSTRAP   := deploy/helm/bootstrap
-CHART_VLLM        := deploy/helm/vllm
-CHART_LLAMASTACK  := deploy/helm/llamastack
-CHART_API         := deploy/helm/api
-CHART_INGESTION   := deploy/helm/ingestion
+CHART_POSTGRES  := deploy/helm/postgres
+CHART_BOOTSTRAP := deploy/helm/bootstrap
+CHART_VLLM      := deploy/helm/vllm
+CHART_API       := deploy/helm/api
+CHART_INGESTION := deploy/helm/ingestion
 
 # Common flags passed to every helm command
 HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
 
 # ── Phony declarations ────────────────────────────────────────────────────────
 .PHONY: all help \
-        build build-postgres build-app build-llamastack \
+        build build-postgres build-app \
         deploy deploy-postgres deploy-bootstrap deploy-vllm \
-        deploy-llamastack deploy-api deploy-ingestion \
+        deploy-api deploy-ingestion \
         undeploy status lint-charts \
         _guard-pg-password _guard-oc _guard-helm _guard-podman
 
@@ -71,12 +68,10 @@ help:
 	@printf "  %-28s %s\n" "build"                  "Build and push all container images"
 	@printf "  %-28s %s\n" "build-postgres"          "Build and push Postgres image"
 	@printf "  %-28s %s\n" "build-app"               "Build and push FastAPI app image"
-	@printf "  %-28s %s\n" "build-llamastack"        "Build and push Llama Stack image"
 	@printf "  %-28s %s\n" "deploy PG_PASSWORD=<pw>" "Deploy all components in order"
 	@printf "  %-28s %s\n" "deploy-postgres"         "Deploy only Postgres"
 	@printf "  %-28s %s\n" "deploy-bootstrap"        "Deploy only schema bootstrap Job"
-	@printf "  %-28s %s\n" "deploy-vllm"             "Deploy only vLLM"
-	@printf "  %-28s %s\n" "deploy-llamastack"       "Deploy only Llama Stack"
+	@printf "  %-28s %s\n" "deploy-vllm"             "Deploy only vLLM (optional)"
 	@printf "  %-28s %s\n" "deploy-api"              "Deploy only FastAPI app"
 	@printf "  %-28s %s\n" "deploy-ingestion"        "Deploy only ingestion CronJob"
 	@printf "  %-28s %s\n" "undeploy"                "Uninstall all Helm releases"
@@ -107,12 +102,13 @@ _guard-podman:
 	  { echo "ERROR: 'podman' not found. Install Podman or substitute 'docker' by setting PODMAN=docker."; exit 1; }
 
 # ── Container image builds ────────────────────────────────────────────────────
-build: _guard-podman build-postgres build-app build-llamastack
+build: _guard-podman build-postgres build-app
 	@echo "==> All images built and pushed to $(REGISTRY)."
 
 build-postgres: _guard-podman
 	@echo "==> Building Postgres image: $(IMG_POSTGRES)"
 	podman build \
+	  --platform=linux/amd64 \
 	  -f deploy/postgres/Containerfile \
 	  -t $(IMG_POSTGRES) \
 	  deploy/postgres
@@ -121,16 +117,11 @@ build-postgres: _guard-podman
 build-app: _guard-podman
 	@echo "==> Building FastAPI app image: $(IMG_APP)"
 	podman build \
+	  --platform=linux/amd64 \
 	  -f deploy/app/Containerfile \
 	  -t $(IMG_APP) \
 	  .
 	podman push $(IMG_APP)
-
-build-llamastack: _guard-podman
-	@echo "==> Building Llama Stack distribution image: $(IMG_LLAMA)"
-	llama stack build --config deploy/llamastack/build.yaml
-	podman tag distribution-general-sim:dev $(IMG_LLAMA)
-	podman push $(IMG_LLAMA)
 
 # ── Namespace bootstrap ───────────────────────────────────────────────────────
 # Called automatically by deploy-postgres; idempotent.
@@ -168,23 +159,14 @@ deploy-vllm: _guard-helm
 	  --wait --timeout 15m
 	@echo "    vLLM ready."
 
-## Step 4 — Llama Stack
-deploy-llamastack: _guard-pg-password _guard-helm
-	@echo "==> Deploying Llama Stack..."
-	helm upgrade --install llamastack $(CHART_LLAMASTACK) \
-	  $(HELM_COMMON) \
-	  --set image=$(IMG_LLAMA) \
-	  --set postgres.password=$(PG_PASSWORD) \
-	  --wait --timeout 3m
-	@echo "    Llama Stack ready."
-
-## Step 5 — FastAPI API
+## Step 4 — FastAPI API
 deploy-api: _guard-pg-password _guard-helm
 	@echo "==> Deploying FastAPI API..."
 	helm upgrade --install api $(CHART_API) \
 	  $(HELM_COMMON) \
 	  --set image=$(IMG_APP) \
 	  --set postgres.password=$(PG_PASSWORD) \
+	  --set llm.apiKey=$(OPENAI_API_KEY) \
 	  --wait --timeout 3m
 	@printf "    API ready. Route:\n"
 	@oc get route general-sim-api -n $(NAMESPACE) \
@@ -197,13 +179,14 @@ deploy-ingestion: _guard-pg-password _guard-helm
 	  $(HELM_COMMON) \
 	  --set image=$(IMG_APP) \
 	  --set postgres.password=$(PG_PASSWORD) \
+	  --set llm.apiKey=$(OPENAI_API_KEY) \
 	  --wait --timeout 2m
 	@echo "    Ingestion CronJob configured."
 
 ## Full ordered deploy
 deploy: _guard-pg-password _guard-oc _guard-helm \
         deploy-postgres deploy-bootstrap deploy-vllm \
-        deploy-llamastack deploy-api deploy-ingestion
+        deploy-api deploy-ingestion
 	@printf "\n==> Full deployment complete.\n"
 	@printf "    Smoke test:\n"
 	@printf "      ROUTE=\$$(oc get route general-sim-api -n $(NAMESPACE)"
@@ -214,10 +197,9 @@ deploy: _guard-pg-password _guard-oc _guard-helm \
 # Uninstalls all releases in reverse order; ignores missing releases.
 undeploy: _guard-helm
 	@echo "==> Removing Helm releases from namespace $(NAMESPACE)..."
-	helm uninstall ingestion  --namespace $(NAMESPACE) 2>/dev/null || true
-	helm uninstall api        --namespace $(NAMESPACE) 2>/dev/null || true
-	helm uninstall llamastack --namespace $(NAMESPACE) 2>/dev/null || true
-	helm uninstall vllm       --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall ingestion --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall api       --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall vllm      --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall bootstrap  --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall postgres   --namespace $(NAMESPACE) 2>/dev/null || true
 	@echo "    Done. PVCs are NOT deleted automatically — remove manually if needed:"
@@ -237,7 +219,6 @@ lint-charts: _guard-helm
 	  $(CHART_POSTGRES) \
 	  $(CHART_BOOTSTRAP) \
 	  $(CHART_VLLM) \
-	  $(CHART_LLAMASTACK) \
 	  $(CHART_API) \
 	  $(CHART_INGESTION); do \
 	  printf "==> Linting $$chart ...\n"; \

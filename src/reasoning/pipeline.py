@@ -8,8 +8,8 @@ Architecture (important boundary):
 
   Stage 1 calls AGE directly.
   Stage 2 calls PostGIS directly and then calls the Solver.
-  Stage 3 calls LlamaStackClient for vector_search() + generate().
-  Llama Stack is the inference/vector/tool *backend*, not the top-level
+  Stage 3 calls LLMClientBase for vector_search() + generate().
+  The LLM client is the inference/vector *backend*, not the top-level
   controller.
 
   The live store is NEVER mutated by this pipeline.
@@ -21,7 +21,7 @@ import logging
 import asyncpg
 
 from src.core.solver import Solver
-from src.llamastack.base import LlamaStackClientBase
+from src.llm.base import LLMClientBase
 from src.reasoning.stage1 import run_stage1
 from src.reasoning.stage2 import run_stage2
 from src.reasoning.stage3 import run_stage3
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 async def run_pipeline(
     request: QueryRequest,
     pool: asyncpg.Pool,
-    llm_client: LlamaStackClientBase,
+    llm_client: LLMClientBase,
     solver: Solver | None = None,
 ) -> QueryResponse:
     """Execute all three stages and return a fully structured response.
@@ -46,7 +46,7 @@ async def run_pipeline(
     pool:
         asyncpg connection pool — used READ-ONLY by Stages 1 & 2.
     llm_client:
-        LlamaStackClientBase — used by Stage 3 for vector search and generate.
+        LLMClientBase — used by Stage 3 for vector search and generate.
     solver:
         Optional Solver override.  Defaults to StubSolver.
     """

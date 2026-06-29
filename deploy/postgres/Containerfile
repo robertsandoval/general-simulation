@@ -1,8 +1,9 @@
 # Custom PostgreSQL image bundling Apache AGE, pgvector, and PostGIS.
 #
 # NOTE: This is the riskiest build step in the project.  If it fails, check:
-#   - That the AGE_VERSION tag exists on https://github.com/apache/age/releases
-#     (tag format is "v<version>", e.g. v1.5.0).
+#   - That AGE_VERSION / AGE_RELEASE match a release on https://github.com/apache/age/releases
+#     All PG16 tags follow the pattern PG16/v<version>-rc0 (no plain stable tag exists).
+#     Set both ARGs: AGE_VERSION=1.6.0  AGE_RELEASE=1.6.0-rc0
 #   - That PGVECTOR_VERSION matches a tag on https://github.com/pgvector/pgvector.
 #   - That postgresql-16-postgis-3 is available in the PGDG apt mirror.
 #
@@ -17,7 +18,11 @@
 FROM postgres:16.3-bookworm
 
 ARG PGVECTOR_VERSION=0.8.0
-ARG AGE_VERSION=1.5.0
+# AGE release version (used in the tarball filename: apache-age-<AGE_VERSION>-src.tar.gz)
+ARG AGE_VERSION=1.6.0
+# AGE release tag on GitHub (url-encoded slash): PG16/v<AGE_VERSION>-rc0
+# All PG16 releases carry the -rc0 suffix; there are no "final" tags.
+ARG AGE_RELEASE=1.6.0-rc0
 # PostGIS major version (package name: postgresql-16-postgis-<POSTGIS_MAJOR>)
 ARG POSTGIS_MAJOR=3
 
@@ -26,6 +31,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ── Single RUN layer: install build tools, compile pgvector & AGE, remove tools ─
 RUN set -eux; \
     apt-get update; \
+    # CA certificates must be installed first so git can verify TLS when cloning.
+    apt-get install -y --no-install-recommends ca-certificates; \
+    update-ca-certificates; \
     # PostGIS runtime (no compilation needed — available in PGDG apt)
     apt-get install -y --no-install-recommends \
         "postgresql-16-postgis-${POSTGIS_MAJOR}" \
@@ -34,6 +42,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         build-essential \
         git \
+        wget \
         postgresql-server-dev-16 \
         libreadline-dev \
         flex \
@@ -51,24 +60,38 @@ RUN set -eux; \
     rm -rf /tmp/pgvector; \
     \
     # ── Apache AGE ────────────────────────────────────────────────────────────
+    # All PG16 AGE releases use tags like PG16/v1.6.0-rc0 (no plain stable tag).
+    # Downloading the release tarball avoids git --branch issues with slash tags.
     # AGE must be in shared_preload_libraries (handled at runtime, not here).
-    git clone \
-        --branch "v${AGE_VERSION}" \
-        --depth 1 \
-        https://github.com/apache/age.git /tmp/age; \
-    cd /tmp/age; \
+    wget -q -O /tmp/age.tar.gz \
+        "https://github.com/apache/age/releases/download/PG16%2Fv${AGE_RELEASE}/apache-age-${AGE_VERSION}-src.tar.gz"; \
+    tar -xzf /tmp/age.tar.gz -C /tmp; \
+    cd "/tmp/apache-age-${AGE_VERSION}"; \
     make; \
     make install; \
     cd /; \
-    rm -rf /tmp/age; \
+    rm -rf "/tmp/apache-age-${AGE_VERSION}" /tmp/age.tar.gz; \
     \
     # ── Strip build toolchain to keep the image lean ──────────────────────────
     apt-get purge -y \
+        ca-certificates \
         build-essential \
         git \
+        wget \
         postgresql-server-dev-16 \
         libreadline-dev \
         flex \
         bison; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
+
+# ── OpenShift arbitrary-UID support ──────────────────────────────────────────
+# OpenShift runs pods with a namespace-allocated UID (e.g. 1001250000) and
+# injects it as the supplemental group.  The official postgres entrypoint
+# silently ignores chown/chmod failures it cannot perform, so initdb works
+# fine under any UID.  The only directory that must be pre-made writable is
+# the Unix socket dir; the PGDATA PVC is made accessible by OpenShift's fsGroup
+# injection at mount time.
+RUN mkdir -p /var/run/postgresql \
+    && chown -R postgres:root /var/run/postgresql \
+    && chmod g=u /var/run/postgresql

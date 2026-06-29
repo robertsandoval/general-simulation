@@ -9,16 +9,16 @@ The LLM receives:
 The LLM EXPLAINS the impact using these numbers.
 It must NOT invent figures beyond what Stages 1 & 2 produced.
 
-All LLM and vector calls go through the LlamaStackClientBase — never directly
-to vLLM or pgvector SQL.
+All LLM and vector calls go through the LLMClientBase — never directly
+to individual backends.
 """
 from __future__ import annotations
 
 import logging
 
 from src.core.solver import AffectedSubgraph, SolverResult
-from src.llamastack.base import LlamaStackClientBase
-from src.llamastack.types import Message
+from src.llm.base import LLMClientBase
+from src.llm.types import Message
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ async def run_stage3(
     question: str,
     subgraph: AffectedSubgraph,
     solver_result: SolverResult,
-    llm_client: LlamaStackClientBase,
+    llm_client: LLMClientBase,
 ) -> str:
     """Retrieve vector context and generate a grounded answer.
 

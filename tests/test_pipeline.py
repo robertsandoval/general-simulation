@@ -9,7 +9,7 @@ Coverage:
 
 No live DB or GPU required:
   - asyncpg pool/connection are mocked (MagicMock / AsyncMock)
-  - FakeLlamaStackClient provides in-memory vector search and generation
+  - FakeLLMClient provides in-memory vector search and generation
   - StubSolver provides deterministic quantitative output
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from src.api.app import app
 from src.api.deps import get_llm_client, get_pool, get_solver
 from src.core.config import Settings
 from src.core.solver import AffectedSubgraph, EntityState
-from src.llamastack.fake import FakeLlamaStackClient
+from src.llm.fake import FakeLLMClient
 from src.reasoning.pipeline import run_pipeline
 from src.reasoning.stage1 import run_stage1
 from src.reasoning.stage2 import run_stage2
@@ -56,14 +56,13 @@ EDGES = [
 def _settings() -> Settings:
     return Settings(
         postgres_dsn="postgresql://mock:mock@localhost/mock",
-        llama_stack_base_url="http://localhost:8321",
-        use_fake_llama_stack=True,
+        llm_backend="fake",
         embedding_dimension=16,
     )
 
 
-def _fake_client() -> FakeLlamaStackClient:
-    return FakeLlamaStackClient(settings=_settings())
+def _fake_client() -> FakeLLMClient:
+    return FakeLLMClient(settings=_settings())
 
 
 def _conn() -> AsyncMock:

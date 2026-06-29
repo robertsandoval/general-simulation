@@ -463,7 +463,7 @@ New domain = these files only:
   src/core/           ← domain-agnostic interfaces and settings
   src/reasoning/      ← three-stage pipeline
   src/graph/          ← AGE helpers
-  src/llamastack/     ← Llama Stack client wrapper
+  src/llm/          ← LLM client: OpenAI-compatible inference + direct pgvector RAG
   src/api/query.py    ← POST /query route
   deploy/openshift/   ← (mostly) all other manifests
 ```
@@ -476,7 +476,7 @@ New domain = these files only:
 |---|---|
 | Adding a domain-specific field to `CanonicalEntity` | Put it in `attributes` (JSONB dict) instead |
 | Adding a new Postgres column for domain data | Don't — use `attributes`; add an index on the JSONB key if needed |
-| Calling vLLM or pgvector SQL directly from the adapter | Don't — all LLM/vector calls go through `src/llamastack/` |
+| Calling the inference API or pgvector SQL directly from the adapter | Don’t — all LLM/vector calls go through `src/llm/` |
 | Mutating the live store during a simulation query | Don't — simulation overlays (`inject_event`) are additive and reversible; `entity` and `entity_state` rows are written only by the ingestion runner |
 | Hardcoding a domain entity name (e.g. `Flight`, `Port`) in a core module | Move it to `attributes` or a domain adapter; keep core code generic |
 | Forgetting `--enable-auto-tool-choice` on vLLM | Tool calls from the reasoning pipeline will silently fail without this flag |
