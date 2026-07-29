@@ -188,7 +188,7 @@ This is what makes multiple concurrent what-if scenarios trivial — each is an 
 
 ## Why the same design serves multiple domains
 
-The platform is best understood as a domain-agnostic skeleton with four well-defined swap points. The skeleton — OpenShift, vLLM (optional), Postgres, the three-stage pipeline, and the overlay mechanism — stays identical. Only four seams change when you move from supply chain to manufacturing.
+The platform is best understood as a domain-agnostic skeleton with four well-defined swap points. The skeleton — OpenShift, vLLM (optional), Neo4j + Postgres, the ReAct agent pipeline, and the overlay mechanism — stays identical. Only four seams change when you move from supply chain to manufacturing.
 
 ![Fixed core vs. swap seams](docs/images/domain-seams.png)
 
