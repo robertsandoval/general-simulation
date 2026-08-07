@@ -3,7 +3,56 @@ entries:
   general-simulation:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-05T16:24:31.89844225Z"
+    created: "2026-08-07T18:40:43.162118507Z"
+    dependencies:
+    - condition: postgres.enabled
+      name: postgres
+      repository: file://../postgres
+      version: 0.1.0
+    - condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 2026.5.0
+    - condition: bootstrap.enabled
+      name: bootstrap
+      repository: file://../bootstrap
+      version: 0.1.0
+    - condition: vllm.enabled
+      name: vllm
+      repository: file://../vllm
+      version: 0.1.0
+    - condition: api.enabled
+      name: api
+      repository: file://../api
+      version: 0.1.1
+    - condition: ingestion.enabled
+      name: ingestion
+      repository: file://../ingestion
+      version: 0.1.0
+    description: 'Umbrella chart for the General Simulation & Impact-Reasoning Platform.
+      Deploys Postgres (pgvector + PostGIS), Neo4j, schema bootstrap, the FastAPI
+      API, and the ingestion CronJob. Optional vLLM is off by default. Install standalone
+      into any namespace, or consume as a Helm subchart from a parent application
+      (same release namespace as the parent). '
+    digest: 456dce42b5112957bbbf59c69fb2708d8f84c2e609b9a73987b962795e2104ea
+    home: https://github.com/robertsandoval/general-simulation
+    keywords:
+    - simulation
+    - neo4j
+    - pgvector
+    - postgis
+    maintainers:
+    - name: general-sim
+    name: general-simulation
+    sources:
+    - https://github.com/robertsandoval/general-simulation
+    type: application
+    urls:
+    - https://robertsandoval.github.io/general-simulation/general-simulation-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-08-07T18:40:43.157344374Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -50,4 +99,4 @@ entries:
     urls:
     - https://robertsandoval.github.io/general-simulation/general-simulation-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-05T16:24:31.89413599Z"
+generated: "2026-08-07T18:40:43.153595443Z"
