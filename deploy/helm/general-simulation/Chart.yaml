@@ -3,12 +3,13 @@ name: general-simulation
 description: >
   Umbrella chart for the General Simulation & Impact-Reasoning Platform.
   Deploys Postgres (pgvector + PostGIS), Neo4j, schema bootstrap, the FastAPI
-  API, and the ingestion CronJob. Optional vLLM is off by default.
+  API, and the ingestion CronJob. Optional in-cluster vLLM via the shared
+  llm-service chart (OpenShift AI / KServe) is off by default.
 
   Install standalone into any namespace, or consume as a Helm subchart from a
   parent application (same release namespace as the parent).
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "0.1.0"
 keywords:
   - simulation
@@ -34,10 +35,10 @@ dependencies:
     version: 0.1.0
     repository: "file://../bootstrap"
     condition: bootstrap.enabled
-  - name: vllm
-    version: 0.1.0
-    repository: "file://../vllm"
-    condition: vllm.enabled
+  - name: llm-service
+    version: 0.5.9
+    repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+    condition: llm-service.enabled
   - name: api
     version: 0.1.1
     repository: "file://../api"

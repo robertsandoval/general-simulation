@@ -15,19 +15,21 @@
 #   make deploy-postgres PG_PASSWORD=<pw>
 #   make deploy-neo4j NEO4J_PASSWORD=<pw>
 #   make deploy-bootstrap PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>
-#   make deploy-vllm
+#   make deploy-llm-service HF_TOKEN=<token>   # Optional — needs OpenShift AI
 #   make deploy-api PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>
 #   make deploy-ingestion PG_PASSWORD=<pw>
 #
 # Variable overrides (pass on the command line):
-#   REGISTRY         Image registry root  (default: quay.io/robertsandoval)
+#   REGISTRY         Image registry root  (default: quay.io/rh-ai-quickstart)
 #   NAMESPACE        OpenShift namespace  (default: general-simulation)
 #   TAG              Image tag            (default: latest)
 #   PG_PASSWORD      Postgres password    (no default — required for deploy targets)
 #   NEO4J_PASSWORD   Neo4j password       (no default — required for deploy targets)
+#   HF_TOKEN         Hugging Face token   (required for deploy-llm-service / gated models)
 #
 # Example:
 #   make deploy PG_PASSWORD=s3cr3t NEO4J_PASSWORD=n3o4j! OPENAI_API_KEY=sk-...
+#   make deploy-llm-service HF_TOKEN=hf_...
 #   make build TAG=v1.2.3
 #   make package-chart                 # umbrella chart for Pages / subchart consumers
 # =============================================================================
@@ -39,21 +41,23 @@ TAG              ?= latest
 PG_PASSWORD      ?=
 NEO4J_PASSWORD   ?=
 OPENAI_API_KEY   ?=
+HF_TOKEN         ?=
 CHART_REPO_URL   ?= https://robertsandoval.github.io/general-simulation
+LLM_SERVICE_CHART_REPO ?= https://rh-ai-quickstart.github.io/ai-architecture-charts
+LLM_SERVICE_VERSION    ?= 0.5.9
 
 # ── Derived image references ──────────────────────────────────────────────────
 IMG_POSTGRES := $(REGISTRY)/general-sim-postgres:$(TAG)
 IMG_APP      := $(REGISTRY)/general-simulation-api:$(TAG)
-IMG_VLLM     := docker.io/vllm/vllm-openai:v0.6.3
 
 # ── Helm chart paths ──────────────────────────────────────────────────────────
 CHART_POSTGRES  := deploy/helm/postgres
 CHART_NEO4J     := deploy/helm/neo4j
 CHART_BOOTSTRAP := deploy/helm/bootstrap
-CHART_VLLM      := deploy/helm/vllm
 CHART_API       := deploy/helm/api
 CHART_INGESTION := deploy/helm/ingestion
 CHART_UMBRELLA  := deploy/helm/general-simulation
+LLM_SERVICE_VALUES := deploy/helm/llm-service-values.yaml
 
 # Common flags passed to every helm command
 HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
@@ -61,11 +65,12 @@ HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
 # ── Phony declarations ────────────────────────────────────────────────────────
 .PHONY: all help \
         build build-postgres build-app \
-        deploy deploy-postgres deploy-neo4j deploy-bootstrap deploy-vllm \
+        deploy deploy-postgres deploy-neo4j deploy-bootstrap deploy-llm-service \
         deploy-api deploy-ingestion deploy-umbrella neo4j-connect \
         package-chart \
         undeploy status lint-charts \
-        _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm _guard-podman
+        _guard-pg-password _guard-neo4j-password _guard-hf-token \
+        _guard-oc _guard-helm _guard-podman
 
 # ── Default target ────────────────────────────────────────────────────────────
 all: help
@@ -76,12 +81,12 @@ help:
 	@printf "  %-36s %s\n" "build"                               "Build and push all container images"
 	@printf "  %-36s %s\n" "build-postgres"                      "Build and push Postgres image"
 	@printf "  %-36s %s\n" "build-app"                           "Build and push FastAPI app image"
-	@printf "  %-36s %s\n" "deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>" "Deploy all components in order"
+	@printf "  %-36s %s\n" "deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>" "Deploy core components (no llm-service)"
 	@printf "  %-36s %s\n" "deploy-postgres"                     "Deploy only Postgres"
 	@printf "  %-36s %s\n" "deploy-neo4j"                        "Deploy only Neo4j"
 	@printf "  %-36s %s\n" "neo4j-connect"                       "Port-forward Neo4j and print connection URLs"
 	@printf "  %-36s %s\n" "deploy-bootstrap"                    "Deploy only schema bootstrap Job"
-	@printf "  %-36s %s\n" "deploy-vllm"                         "Deploy only vLLM (optional)"
+	@printf "  %-36s %s\n" "deploy-llm-service HF_TOKEN=<tok>"   "Deploy in-cluster vLLM (OpenShift AI)"
 	@printf "  %-36s %s\n" "deploy-api"                          "Deploy only FastAPI app"
 	@printf "  %-36s %s\n" "deploy-ingestion"                    "Deploy only ingestion CronJob"
 	@printf "  %-36s %s\n" "deploy-umbrella"                     "Deploy umbrella chart (single release)"
@@ -95,6 +100,7 @@ help:
 	@printf "  %-18s %s\n" "TAG"              "$(TAG)"
 	@printf "  %-18s %s\n" "PG_PASSWORD"      "(required for deploy targets — no default)"
 	@printf "  %-18s %s\n" "NEO4J_PASSWORD"   "(required for deploy targets — no default)"
+	@printf "  %-18s %s\n" "HF_TOKEN"         "(required for deploy-llm-service — gated models)"
 	@printf "  %-18s %s\n" "CHART_REPO_URL"   "$(CHART_REPO_URL)"
 	@printf "\n"
 
@@ -106,6 +112,10 @@ _guard-pg-password:
 _guard-neo4j-password:
 	@test -n "$(NEO4J_PASSWORD)" || \
 	  { printf "ERROR: NEO4J_PASSWORD is required.\nRun: make <target> NEO4J_PASSWORD=<password>\n"; exit 1; }
+
+_guard-hf-token:
+	@test -n "$(HF_TOKEN)" || \
+	  { printf "ERROR: HF_TOKEN is required for llm-service (gated models).\nRun: make deploy-llm-service HF_TOKEN=<token>\n"; exit 1; }
 
 _guard-oc:
 	@command -v oc >/dev/null 2>&1 || \
@@ -209,14 +219,24 @@ deploy-bootstrap: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --atomic --timeout 3m
 	@echo "    Bootstrap complete."
 
-## Step 4 — vLLM  (GPU required; timeout is generous for model loading)
-deploy-vllm: _guard-helm
-	@echo "==> Deploying vLLM..."
-	helm upgrade --install vllm $(CHART_VLLM) \
+## Step 4 — In-cluster vLLM via llm-service (OpenShift AI / KServe required)
+deploy-llm-service: _guard-hf-token _guard-helm _guard-oc _deploy-namespace
+	@echo "==> Deploying llm-service (vLLM on OpenShift AI)..."
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
+	helm upgrade --install llm-service ai-architecture-charts/llm-service \
+	  --version $(LLM_SERVICE_VERSION) \
 	  $(HELM_COMMON) \
-	  --set image=$(IMG_VLLM) \
-	  --wait --timeout 15m
-	@echo "    vLLM ready."
+	  -f $(LLM_SERVICE_VALUES) \
+	  --set-string secret.hf_token='$(HF_TOKEN)' \
+	  --wait --timeout 20m
+	@printf "    llm-service ready.\n"
+	@printf "    OpenAI-compatible base URL (same namespace):\n"
+	@printf "      http://llama-3-2-3b-instruct-vllm/v1\n"
+	@printf "    Point the API at it, for example:\n"
+	@printf "      make deploy-api PG_PASSWORD=... NEO4J_PASSWORD=... \\\n"
+	@printf "        OPENAI_API_KEY=unused \\\n"
+	@printf "        # plus --set llm.baseUrl=http://llama-3-2-3b-instruct-vllm/v1\n\n"
 
 ## Step 5 — FastAPI API
 deploy-api: _guard-pg-password _guard-neo4j-password _guard-helm
@@ -244,11 +264,13 @@ deploy-ingestion: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --wait --timeout 2m
 	@echo "    Ingestion CronJob configured."
 
-## Full ordered deploy (per-component releases)
+## Full ordered deploy (per-component releases; llm-service is opt-in)
 deploy: _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm \
-        deploy-postgres deploy-neo4j deploy-bootstrap deploy-vllm \
+        deploy-postgres deploy-neo4j deploy-bootstrap \
         deploy-api deploy-ingestion
-	@printf "\n==> Full deployment complete.\n"
+	@printf "\n==> Core deployment complete.\n"
+	@printf "    Optional in-cluster vLLM (OpenShift AI):\n"
+	@printf "      make deploy-llm-service HF_TOKEN=<token>\n"
 	@printf "    Smoke test:\n"
 	@printf "      ROUTE=\$$(oc get route general-sim-api -n $(NAMESPACE)"
 	@printf " -o jsonpath='{.spec.host}')\n"
@@ -267,6 +289,8 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm 
 	@echo "==> Updating umbrella chart dependencies..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
 	helm dependency update $(CHART_UMBRELLA)
 	@echo "==> Deploying umbrella chart general-simulation..."
 	helm upgrade --install general-simulation $(CHART_UMBRELLA) \
@@ -284,16 +308,23 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm 
 	  --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
 	  --set-string api.llm.apiKey='$(OPENAI_API_KEY)' \
 	  --set-string ingestion.llm.apiKey='$(OPENAI_API_KEY)' \
-	  --set vllm.enabled=false \
+	  --set llm-service.enabled=false \
 	  --wait --timeout 15m
 	@printf "    Umbrella release ready. Same-NS URL: http://general-sim-api:8000\n"
 	@printf "    Cross-NS URL: http://general-sim-api.$(NAMESPACE).svc:8000\n"
+	@printf "    To enable in-cluster vLLM on this release:\n"
+	@printf "      helm upgrade general-simulation $(CHART_UMBRELLA) ... \\\n"
+	@printf "        --set llm-service.enabled=true \\\n"
+	@printf "        --set llm-service.models.llama-3-2-3b-instruct.enabled=true \\\n"
+	@printf "        --set-string llm-service.secret.hf_token=\$$HF_TOKEN\n"
 
 ## Package umbrella chart (for GitHub Pages / local testing)
 package-chart: _guard-helm
 	@echo "==> Packaging $(CHART_UMBRELLA) ..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
 	helm dependency update $(CHART_UMBRELLA)
 	helm lint $(CHART_UMBRELLA)
 	mkdir -p dist
@@ -306,6 +337,7 @@ undeploy: _guard-helm
 	helm uninstall general-simulation --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall ingestion --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall api       --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall llm-service --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall vllm      --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall bootstrap --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall neo4j     --namespace $(NAMESPACE) 2>/dev/null || true
@@ -326,7 +358,6 @@ lint-charts: _guard-helm
 	@for chart in \
 	  $(CHART_POSTGRES) \
 	  $(CHART_BOOTSTRAP) \
-	  $(CHART_VLLM) \
 	  $(CHART_API) \
 	  $(CHART_INGESTION); do \
 	  printf "==> Linting $$chart ...\n"; \
@@ -335,6 +366,8 @@ lint-charts: _guard-helm
 	@echo "==> Updating and linting umbrella chart..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
 	helm dependency update $(CHART_UMBRELLA)
 	helm lint $(CHART_UMBRELLA)
 	@echo "==> All charts passed lint."

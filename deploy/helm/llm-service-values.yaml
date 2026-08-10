@@ -1,0 +1,21 @@
+# Values for a standalone `llm-service` install (make deploy-llm-service).
+# Same defaults as the umbrella chart's llm-service: block — keep in sync.
+#
+# Requires OpenShift AI / KServe CRDs. Service URL after enable:
+#   http://llama-3-2-3b-instruct-vllm/v1
+
+device: gpu
+rawDeploymentMode: true
+
+secret:
+  enabled: true
+  # Overridden by make deploy-llm-service HF_TOKEN=...
+  hf_token: ""
+
+models:
+  llama-3-2-3b-instruct:
+    enabled: true
+    device: gpu
+  llama-3-1-8b-instruct:
+    enabled: false
+    device: gpu

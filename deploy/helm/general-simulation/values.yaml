@@ -66,9 +66,27 @@ bootstrap:
     user: neo4j
     password: ""
 
-# ── Optional vLLM (off by default; clients often bring their own LLM) ─────────
-vllm:
+# ── Optional in-cluster vLLM via llm-service (OpenShift AI / KServe) ──────────
+# Off by default. Requires Red Hat OpenShift AI (KServe CRDs) + GPU (or CPU
+# device profile). When enabling, also point api/ingestion llm.baseUrl at the
+# Service the chart creates, e.g.:
+#   http://llama-3-2-3b-instruct-vllm/v1
+# Pass HF token via --set llm-service.secret.hf_token=<token> (gated models).
+llm-service:
   enabled: false
+  device: gpu
+  rawDeploymentMode: true
+  secret:
+    enabled: true
+    hf_token: ""
+  models:
+    llama-3-2-3b-instruct:
+      enabled: false
+      device: gpu
+    llama-3-1-8b-instruct:
+      enabled: false
+      device: gpu
+
 # ── FastAPI API (Service name: general-sim-api, port 8000) ─────────────────────
 api:
   enabled: true
@@ -92,6 +110,9 @@ api:
     user: neo4j
     password: ""
   llm:
+    # Default: OpenAI. For in-cluster llm-service, e.g.:
+    #   baseUrl: http://llama-3-2-3b-instruct-vllm/v1
+    #   apiKey: unused
     baseUrl: "https://api.openai.com/v1"
     apiKey: ""
     backend: "openai"

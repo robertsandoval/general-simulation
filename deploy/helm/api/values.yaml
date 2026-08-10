@@ -33,10 +33,10 @@ neo4j:
 
 llm:
   # Base URL for the OpenAI-compatible inference endpoint.
-  # Override to point at a self-hosted model (vLLM, Llama Stack, Ollama, etc.):
-  #   --set llm.baseUrl=http://vllm:8080/v1
+  # Override to point at a self-hosted model (llm-service / vLLM, Llama Stack, etc.):
+  #   --set llm.baseUrl=http://llama-3-2-3b-instruct-vllm/v1
   #   --set llm.baseUrl=http://llamastack:8321/v1
-  # Cross-namespace: http://vllm.<ns>.svc:8080/v1
+  # Cross-namespace: http://llama-3-2-3b-instruct-vllm.<ns>.svc/v1
   baseUrl: "https://api.openai.com/v1"
   # API key — pass via --set llm.apiKey=<key>
   # Set to any non-empty string for self-hosted endpoints that don't require auth.

@@ -67,7 +67,7 @@ OpenShift is the deployment substrate and a fixed requirement, not an interchang
 
 ### vLLM — local inference (optional)
 
-vLLM serves an open-weight language model locally on GPU, keeping inference inside your cluster. It exposes an OpenAI-compatible `/v1` interface. To use it, set `LLM_BASE_URL=http://vllm.general-sim.svc:8080/v1`. The model must support **structured tool calling** if you use the tool-calling path.
+vLLM serves an open-weight language model locally on GPU, keeping inference inside your cluster. It exposes an OpenAI-compatible `/v1` interface. To use it, set `LLM_BASE_URL=http://llama-3-2-3b-instruct-vllm/v1` (Service name from `llm-service`). The model must support **structured tool calling** if you use the tool-calling path.
 
 ### LLM client — the inference and RAG backend
 
@@ -76,7 +76,7 @@ The app talks to any OpenAI-compatible inference endpoint through `src/llm/opena
 | Provider | `LLM_BASE_URL` | `LLM_BACKEND` |
 |---|---|---|
 | OpenAI (default) | `https://api.openai.com/v1` | `openai` |
-| vLLM (self-hosted) | `http://vllm.svc:8080/v1` | `openai` |
+| vLLM (self-hosted via `llm-service`) | `http://llama-3-2-3b-instruct-vllm/v1` | `openai` |
 | Llama Stack `/v1` | `http://llamastack.svc:8321/v1` | `openai` |
 | Llama Stack SDK | `http://llamastack.svc:8321` | `llamastack` |
 | Tests / no GPU | *(any)* | `fake` |
@@ -437,11 +437,11 @@ Helm chart under `deploy/helm/` so components can be upgraded independently.
 | `oc` CLI logged in | `oc login ...` — needs cluster-admin (or a role covering Deployments, StatefulSets, Services, Routes, Jobs, CronJobs, Secrets, ConfigMaps, ServiceAccounts, and ClusterRoleBindings) |
 | `helm` 3.x | [Install Helm](https://helm.sh/docs/intro/install/) |
 | `podman` | To build and push images |
-| GPU nodes | Required for vLLM only; CPU nodes are sufficient for everything else |
-| NVIDIA GPU Operator | Install via OperatorHub if using the plain vLLM Deployment |
-| (Optional) Red Hat OpenShift AI | Only needed for the KServe `InferenceService` vLLM path |
+| GPU nodes | Required only when enabling `llm-service` on GPU |
+| NVIDIA GPU Operator | Required for GPU `llm-service` device profile |
+| Red Hat OpenShift AI | Required for in-cluster `llm-service` (KServe ServingRuntime / InferenceService) |
 
-No additional operators are required. Postgres runs as a plain StatefulSet.
+Core platform components (Postgres, Neo4j, API, ingestion) need no extra operators. Postgres runs as a plain StatefulSet. In-cluster vLLM uses the shared `llm-service` chart on OpenShift AI.
 
 ---
 
@@ -459,7 +459,7 @@ make build
 make deploy PG_PASSWORD=<your-password>
 ```
 
-`make deploy` runs the steps below in order, waiting for each to be healthy before proceeding. It deploys Postgres, Neo4j, the schema bootstrap Job, vLLM (optional), the API, and the ingestion CronJob.
+`make deploy` runs the steps below in order, waiting for each to be healthy before proceeding. It deploys Postgres, Neo4j, the schema bootstrap Job, the API, and the ingestion CronJob. In-cluster vLLM is opt-in via `make deploy-llm-service` (OpenShift AI).
 
 ---
 
@@ -470,9 +470,9 @@ make deploy PG_PASSWORD=<your-password>
 | `postgres` | `deploy/helm/postgres` | StatefulSet, 2 Services, ServiceAccount, ClusterRoleBinding (anyuid SCC), Secret, ConfigMap (init SQL) |
 | `neo4j` | `neo4j/neo4j` (official chart) | StatefulSet, Services, OpenShift Route (Browser UI) |
 | `bootstrap` | `deploy/helm/bootstrap` | Job (Helm post-install/upgrade hook — auto-deleted on success) |
-| `vllm` | `deploy/helm/vllm` | Deployment, Service, PVC (30 Gi) |
+| `llm-service` | [ai-architecture-charts](https://rh-ai-quickstart.github.io/ai-architecture-charts) | KServe ServingRuntime + InferenceService (vLLM); off by default |
 | `llamastack` | `deploy/archived/llamastack-helm` | (archived — see `deploy/archived/` to restore) |
-| `api` | `deploy/helm/api` | Deployment (2 replicas), Service, OpenShift Route, ConfigMap, Secret |
+| `api` | `deploy/helm/api` | Deployment, Service, OpenShift Route, ConfigMap, Secret |
 | `ingestion` | `deploy/helm/ingestion` | CronJob (every 10 min, `concurrencyPolicy: Forbid`) |
 
 ---
@@ -530,25 +530,39 @@ Re-running `make deploy-bootstrap` is fully idempotent.
 
 ---
 
-### Step 4 — Deploy vLLM
+### Step 4 — Deploy in-cluster vLLM (optional, OpenShift AI)
+
+Requires Red Hat OpenShift AI (KServe). Uses the shared `llm-service` chart
+from [ai-architecture-charts](https://rh-ai-quickstart.github.io/ai-architecture-charts).
 
 ```bash
-make deploy-vllm
+make deploy-llm-service HF_TOKEN=<your-hf-token>
 ```
 
-Deploys the `vllm` chart (plain Deployment + 30 Gi PVC).  The Deployment
-targets GPU nodes via `nodeSelector: nvidia.com/gpu.present: "true"` and
-runs vLLM with `--enable-auto-tool-choice` and `--tool-call-parser=llama3_json`
-so Llama Stack tool calling works correctly.
+This installs a KServe `ServingRuntime` + `InferenceService` for
+`meta-llama/Llama-3.2-3B-Instruct` (override models in
+`deploy/helm/llm-service-values.yaml`). The OpenAI-compatible endpoint is:
 
-> The `--wait --timeout 15m` flag is used here because the GPU pod may take
-> several minutes to pull the model weights on first start.
+```text
+http://llama-3-2-3b-instruct-vllm/v1
+```
 
-**Alternative — KServe InferenceService** (requires OpenShift AI / RHOAI):
+Point the API at it when deploying (and set a non-empty `OPENAI_API_KEY`):
 
 ```bash
-oc apply -f deploy/openshift/vllm/inferenceservice.yaml
+helm upgrade api deploy/helm/api -n general-simulation \
+  --reuse-values \
+  --set llm.baseUrl=http://llama-3-2-3b-instruct-vllm/v1 \
+  --set-string llm.apiKey=unused
 ```
+
+Or enable `llm-service` inside the umbrella release (`llm-service.enabled=true`)
+instead of the standalone `make deploy-llm-service` target.
+
+> First start downloads model weights and can take several minutes.
+
+Legacy plain Deployment manifests remain under `deploy/openshift/vllm/` and
+`deploy/archived/vllm-helm/` for reference only.
 
 ---
 
@@ -614,7 +628,8 @@ make undeploy
 ```bash
 make help                                            # List all targets and variables
 make build                                           # Build and push all images
-make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>    # Full ordered deploy
+make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>    # Core ordered deploy
+make deploy-llm-service HF_TOKEN=<tok>              # Optional OpenShift AI vLLM
 make deploy-neo4j NEO4J_PASSWORD=<pw>               # Deploy only Neo4j
 make neo4j-connect                                  # Port-forward Neo4j locally
 make status                                         # helm list + oc get pods
@@ -626,12 +641,13 @@ Override defaults on the command line:
 
 | Variable | Default | Description |
 |---|---|---|
-| `REGISTRY` | `quay.io/robertsandoval` | Image registry root |
+| `REGISTRY` | `quay.io/rh-ai-quickstart` | Image registry root |
 | `NAMESPACE` | `general-simulation` | Target OpenShift namespace |
 | `TAG` | `latest` | Image tag for all built images |
 | `PG_PASSWORD` | *(none)* | Postgres password — required for deploy targets |
 | `NEO4J_PASSWORD` | *(none)* | Neo4j password — required for deploy and bootstrap targets |
 | `OPENAI_API_KEY` | *(none)* | API key for the inference endpoint |
+| `HF_TOKEN` | *(none)* | Hugging Face token — required for `deploy-llm-service` |
 
 ---
 
@@ -644,7 +660,7 @@ Short names resolve inside the release namespace (standalone or when this chart 
 | Postgres | `postgres:5432` | `postgres.general-simulation.svc:5432` |
 | Neo4j Bolt | `bolt://neo4j:7687` | `bolt://neo4j.general-simulation.svc:7687` |
 | Neo4j HTTP | `http://neo4j:7474` | `http://neo4j.general-simulation.svc:7474` |
-| vLLM | `http://vllm:8080` | `http://vllm.general-simulation.svc:8080` |
+| vLLM (`llm-service`) | `http://llama-3-2-3b-instruct-vllm` | `http://llama-3-2-3b-instruct-vllm.<ns>.svc` |
 | API | `http://general-sim-api:8000` | `http://general-sim-api.general-simulation.svc:8000` |
 
 The umbrella chart under `deploy/helm/general-simulation` can be installed as a single release (`make deploy-umbrella`) or published to GitHub Pages for use as a Helm subchart. See [`deploy/helm/general-simulation/README.md`](deploy/helm/general-simulation/README.md).

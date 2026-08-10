@@ -26,7 +26,7 @@ Parent / subchart dependency:
 ```yaml
 dependencies:
   - name: general-simulation
-    version: 0.1.0
+    version: 0.1.2
     repository: https://robertsandoval.github.io/general-simulation
     condition: general-simulation.enabled
 ```
@@ -51,6 +51,18 @@ helm upgrade --install general-simulation general-simulation/general-simulation 
   --set ingestion.neo4j.password=<NEO4J_PASSWORD> \
   --set-string api.llm.apiKey=<OPENAI_API_KEY> \
   --wait --timeout 15m
+```
+
+Enable in-cluster vLLM (OpenShift AI / KServe) in the same release:
+
+```bash
+helm upgrade general-simulation general-simulation/general-simulation \
+  -n general-simulation --reuse-values \
+  --set llm-service.enabled=true \
+  --set llm-service.models.llama-3-2-3b-instruct.enabled=true \
+  --set-string llm-service.secret.hf_token=<HF_TOKEN> \
+  --set api.llm.baseUrl=http://llama-3-2-3b-instruct-vllm/v1 \
+  --set-string api.llm.apiKey=unused
 ```
 
 From a local clone (before/without Pages):
@@ -78,10 +90,10 @@ helm upgrade --install general-simulation ./deploy/helm/general-simulation \
 | `bootstrap.enabled` | `true` | Schema Job (hook) |
 | `api.enabled` | `true` | FastAPI |
 | `ingestion.enabled` | `true` | CronJob |
-| `vllm.enabled` | `false` | Optional GPU inference |
+| `llm-service.enabled` | `false` | In-cluster vLLM via OpenShift AI / KServe |
 
 ## Publishing a new chart version
 
 1. Bump `version` in `Chart.yaml`.
-2. Tag `chart-v0.1.0` (or run the release workflow).
+2. Tag `chart-v0.1.2` (or run the release workflow).
 3. CI packages the chart and updates GitHub Pages (`index.yaml` + `.tgz`).

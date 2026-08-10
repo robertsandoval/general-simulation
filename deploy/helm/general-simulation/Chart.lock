@@ -8,14 +8,14 @@ dependencies:
 - name: bootstrap
   repository: file://../bootstrap
   version: 0.1.0
-- name: vllm
-  repository: file://../vllm
-  version: 0.1.0
+- name: llm-service
+  repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+  version: 0.5.9
 - name: api
   repository: file://../api
   version: 0.1.1
 - name: ingestion
   repository: file://../ingestion
   version: 0.1.0
-digest: sha256:b42c848cf79fc7ddeca75f302788c65952bc2fe99ca6303b73a83f1e2c06a277
-generated: "2026-08-07T14:38:13.398771-04:00"
+digest: sha256:8383e8049c954c856d9ce153e647e533a7d94045ba856d23d5736300146c0492
+generated: "2026-08-10T13:06:38.19648-05:00"
