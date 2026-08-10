@@ -95,7 +95,7 @@ api:
     baseUrl: "https://api.openai.com/v1"
     apiKey: ""
     backend: "openai"
-  enabledDomains: aviation
+  enabledDomains: aviation,shipping
 
 # ── Ingestion CronJob ─────────────────────────────────────────────────────────
 ingestion:
@@ -115,5 +115,5 @@ ingestion:
     baseUrl: "https://api.openai.com/v1"
     apiKey: ""
     backend: "openai"
-  enabledDomains: aviation
+  enabledDomains: aviation,shipping
   adapterId: opensky_flights
