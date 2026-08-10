@@ -1,12 +1,14 @@
 """Seed Neo4j + Postgres with demo aircraft, maritime assets, and scenarios.
 
-Simulates OpenSky aircraft in European airspace plus Port of LA / Suez maritime
-entities, wires dependency and cargo edges, injects simulation event overlays,
-and upserts matching PostGIS points for the Supply Chain Map.
+Simulates OpenSky aircraft in European airspace plus Suez maritime entities,
+wires dependency and cargo edges, injects simulation event overlays, and
+upserts matching PostGIS points for the Supply Chain Map.
+
+Port Strike LA lives in the shipping domain — run scripts/seed_shipping.py
+after this script (see ai-supply-chain-agent make seed-gen-sim).
 
 Scenarios match ai-supply-chain-agent frontend presets:
   - opensky-uk-closure-001          (Trigger World Event / UK airspace)
-  - supply-chain-port-strike-la     (Port Strike LA)
   - supply-chain-suez-blockage      (Suez Blockage)
 
 Run from the repo root:
@@ -230,34 +232,10 @@ for _item in CARGO:
     _item["value_usd"] = float(_item["quantity"]) * float(_item["unit_price_usd"])
 
 # ---------------------------------------------------------------------------
-# Maritime demo — Port Strike LA + Suez Blockage (matches supply-chain UI presets)
+# Maritime demo — Suez Blockage (Port Strike LA is seeded via seed_shipping.py)
 # ---------------------------------------------------------------------------
 
 FACILITIES = [
-    {
-        "id": "port-los-angeles",
-        "name": "Port of Los Angeles",
-        "region": "west_coast",
-        "lon": -118.27,
-        "lat": 33.74,
-        "value_usd": 4_200_000.0,
-    },
-    {
-        "id": "port-long-beach",
-        "name": "Port of Long Beach",
-        "region": "west_coast",
-        "lon": -118.20,
-        "lat": 33.75,
-        "value_usd": 3_100_000.0,
-    },
-    {
-        "id": "warehouse-inland-empire",
-        "name": "Inland Empire DC",
-        "region": "west_coast",
-        "lon": -117.43,
-        "lat": 34.05,
-        "value_usd": 1_200_000.0,
-    },
     {
         "id": "port-suez",
         "name": "Suez Canal Authority Hub",
@@ -277,26 +255,6 @@ FACILITIES = [
 ]
 
 VESSELS = [
-    {
-        "id": "vessel-pacific-star",
-        "name": "Pacific Star",
-        "route": "SHA-LAX",
-        "status": "in_transit",
-        "lon": -125.5,
-        "lat": 32.8,
-        "revenue_usd": 890_000.0,
-        "depends_on_port": "port-los-angeles",
-    },
-    {
-        "id": "vessel-westbound-express",
-        "name": "Westbound Express",
-        "route": "YOK-LGB",
-        "status": "in_transit",
-        "lon": -122.8,
-        "lat": 31.5,
-        "revenue_usd": 720_000.0,
-        "depends_on_port": "port-long-beach",
-    },
     {
         "id": "vessel-red-sea-carrier",
         "name": "Red Sea Carrier",
@@ -319,30 +277,8 @@ VESSELS = [
     },
 ]
 
-# Air freight tied into Port Strike LA / Suez scenarios (pulled via DEPENDS_ON).
+# Air freight tied into the Suez scenario (pulled via DEPENDS_ON).
 CORRIDOR_AIRCRAFT = [
-    {
-        "id": "opensky-a4e301",
-        "callsign": "FDX182",
-        "origin": "United States",
-        "route": "ANC-LAX",
-        "status": "airborne",
-        "lon": -118.45,
-        "lat": 33.95,
-        "revenue_usd": 410_000.0,
-        "depends_on_port": "port-los-angeles",
-    },
-    {
-        "id": "opensky-a19ce0",
-        "callsign": "UPS905",
-        "origin": "United States",
-        "route": "HNL-LGB",
-        "status": "airborne",
-        "lon": -118.10,
-        "lat": 33.82,
-        "revenue_usd": 365_000.0,
-        "depends_on_port": "port-long-beach",
-    },
     {
         "id": "opensky-8961e2",
         "callsign": "UAE817",
@@ -368,34 +304,6 @@ CORRIDOR_AIRCRAFT = [
 ]
 
 MARITIME_CARGO: list[dict] = [
-    {
-        "id": "cargo-pacific-star-electronics",
-        "carrier_id": "vessel-pacific-star",
-        "commodity": "electronics",
-        "quantity": 200,
-        "unit_price_usd": 1500.0,
-    },
-    {
-        "id": "cargo-pacific-star-auto",
-        "carrier_id": "vessel-pacific-star",
-        "commodity": "automotive_parts",
-        "quantity": 90,
-        "unit_price_usd": 2200.0,
-    },
-    {
-        "id": "cargo-westbound-apparel",
-        "carrier_id": "vessel-westbound-express",
-        "commodity": "apparel",
-        "quantity": 500,
-        "unit_price_usd": 90.0,
-    },
-    {
-        "id": "cargo-westbound-furniture",
-        "carrier_id": "vessel-westbound-express",
-        "commodity": "furniture",
-        "quantity": 120,
-        "unit_price_usd": 450.0,
-    },
     {
         "id": "cargo-red-sea-auto",
         "carrier_id": "vessel-red-sea-carrier",
@@ -427,34 +335,6 @@ MARITIME_CARGO: list[dict] = [
 ]
 
 CORRIDOR_CARGO: list[dict] = [
-    {
-        "id": "cargo-opensky-a4e301-1",
-        "carrier_id": "opensky-a4e301",
-        "commodity": "express_parcels",
-        "quantity": 80,
-        "unit_price_usd": 420.0,
-    },
-    {
-        "id": "cargo-opensky-a4e301-2",
-        "carrier_id": "opensky-a4e301",
-        "commodity": "medical_devices",
-        "quantity": 15,
-        "unit_price_usd": 9800.0,
-    },
-    {
-        "id": "cargo-opensky-a19ce0-1",
-        "carrier_id": "opensky-a19ce0",
-        "commodity": "perishables",
-        "quantity": 60,
-        "unit_price_usd": 310.0,
-    },
-    {
-        "id": "cargo-opensky-a19ce0-2",
-        "carrier_id": "opensky-a19ce0",
-        "commodity": "semiconductors",
-        "quantity": 25,
-        "unit_price_usd": 7500.0,
-    },
     {
         "id": "cargo-opensky-8961e2-1",
         "carrier_id": "opensky-8961e2",
@@ -491,7 +371,6 @@ for _item in MARITIME_CARGO + CORRIDOR_CARGO:
 # Spatial scope for the UK airspace closure — live PostGIS entities inside
 # this envelope become AFFECTED_BY on every query / sync (not a fixed mock list).
 UK_AFFECT_BBOX = format_bbox(UK_AIRSPACE_BBOX)
-LA_PORTS_BBOX = format_bbox((-118.6, 33.6, -117.3, 34.2))
 SUEZ_CORRIDOR_BBOX = format_bbox((32.0, 27.5, 34.5, 31.5))
 
 DEPENDENCIES = [
@@ -499,23 +378,16 @@ DEPENDENCIES = [
     ("opensky-4ca87e", "opensky-407290"),  # DUB-BOS feeds same NATS track
     ("opensky-3c4b58", "opensky-3c6444"),  # MUC-LHR feeds FRA-ORD connection
     ("opensky-40617d", "opensky-484161"),  # LGW-FCO shares Med corridor with CDG-LAX
-    ("vessel-pacific-star", "port-los-angeles"),
-    ("vessel-westbound-express", "port-long-beach"),
-    ("warehouse-inland-empire", "port-los-angeles"),
-    ("warehouse-inland-empire", "port-long-beach"),
     ("vessel-red-sea-carrier", "port-suez"),
     ("vessel-med-link", "port-suez"),
     ("port-rotterdam", "port-suez"),  # Europe inbound depends on Suez throughput
-    ("opensky-a4e301", "port-los-angeles"),
-    ("opensky-a19ce0", "port-long-beach"),
     ("opensky-8961e2", "port-suez"),
     ("opensky-75804b", "port-suez"),
-    ("opensky-a4e301", "warehouse-inland-empire"),
-    ("opensky-a19ce0", "warehouse-inland-empire"),
 ]
 
 # Scenario IDs match ai-supply-chain-agent frontend presets
-# (Port Strike LA, Suez Blockage, Trigger World Event / UK closure).
+# (Suez Blockage, Trigger World Event / UK closure). Port Strike LA is
+# shipping-la-closure-001 via seed_shipping.py.
 SCENARIOS = [
     {
         "scenario_id": "opensky-uk-closure-001",
@@ -529,18 +401,6 @@ SCENARIOS = [
             "Inbound flights to LHR, LGW, MAN, and EDI are suspended. "
             "Transatlantic traffic on NATS tracks is rerouted via oceanic contingency "
             "tracks further north or through Shanwick/Gander delegation."
-        ),
-    },
-    {
-        "scenario_id": "supply-chain-port-strike-la",
-        "event_id": "evt-port-strike-la-2026",
-        "bbox": LA_PORTS_BBOX,
-        "description": (
-            "Port strike at Los Angeles and Long Beach. Labor action has halted "
-            "container operations at both West Coast hubs. Inbound Asia–US vessels "
-            "are delayed; inland distribution centers depending on LA/LGB faces "
-            "inventory shortfalls within 72 hours. Reroute options include Oakland "
-            "and Prince Rupert with multi-day rail delays."
         ),
     },
     {

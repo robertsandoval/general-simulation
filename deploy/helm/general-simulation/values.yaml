@@ -24,6 +24,9 @@ postgres:
 # ── Neo4j (official neo4j/neo4j chart) ────────────────────────────────────────
 neo4j:
   enabled: true
+  # Stable Service/STS DNS name for api/bootstrap (host "neo4j"), including when
+  # this chart is a subchart under a differently named parent release.
+  fullnameOverride: neo4j
   config:
     server.bolt.advertised_address: ":443"
     server.http.advertised_address: ":443"

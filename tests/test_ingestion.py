@@ -109,7 +109,7 @@ def test_normalize_entity_ids():
     ids = {e.id for e in entities}
     assert "port-us-lax" in ids
     assert "vessel-ever-green-01" in ids
-    assert "cargo-ever-green-01-1" in ids
+    assert "cargo-vessel-ever-green-01-1" in ids
     assert "vessel-bad-no-coords" not in ids
     assert "cargo-bad-no-carrier" not in ids
 
@@ -167,7 +167,7 @@ def test_normalize_cargo_value_usd():
         for e in ShippingDemoAdapter().normalize(raw)
         if e.type == CARGO_TYPE
     }
-    item = cargo["cargo-ever-green-01-1"]
+    item = cargo["cargo-vessel-ever-green-01-1"]
     assert item.attributes["value_usd"] == 400 * 1200
 
 

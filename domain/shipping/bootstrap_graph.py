@@ -52,16 +52,16 @@ FEEDS: list[tuple[str, str]] = [
 
 # (carrier_id, cargo_id)
 CARRIES: list[tuple[str, str]] = [
-    ("vessel-ever-green-01", "cargo-ever-green-01-1"),
-    ("vessel-ever-green-01", "cargo-ever-green-01-2"),
-    ("vessel-cosco-pacific-07", "cargo-cosco-pacific-07-1"),
-    ("vessel-cosco-pacific-07", "cargo-cosco-pacific-07-2"),
-    ("vessel-maersk-horizon-03", "cargo-maersk-horizon-03-1"),
-    ("vessel-maersk-horizon-03", "cargo-maersk-horizon-03-2"),
-    ("vessel-hapag-transpac-12", "cargo-hapag-transpac-12-1"),
-    ("vessel-one-cascade-09", "cargo-one-cascade-09-1"),
-    ("vessel-yangming-star-02", "cargo-yangming-star-02-1"),
-    ("vessel-yangming-star-02", "cargo-yangming-star-02-2"),
+    ("vessel-ever-green-01", "cargo-vessel-ever-green-01-1"),
+    ("vessel-ever-green-01", "cargo-vessel-ever-green-01-2"),
+    ("vessel-cosco-pacific-07", "cargo-vessel-cosco-pacific-07-1"),
+    ("vessel-cosco-pacific-07", "cargo-vessel-cosco-pacific-07-2"),
+    ("vessel-maersk-horizon-03", "cargo-vessel-maersk-horizon-03-1"),
+    ("vessel-maersk-horizon-03", "cargo-vessel-maersk-horizon-03-2"),
+    ("vessel-hapag-transpac-12", "cargo-vessel-hapag-transpac-12-1"),
+    ("vessel-one-cascade-09", "cargo-vessel-one-cascade-09-1"),
+    ("vessel-yangming-star-02", "cargo-vessel-yangming-star-02-1"),
+    ("vessel-yangming-star-02", "cargo-vessel-yangming-star-02-2"),
 ]
 
 

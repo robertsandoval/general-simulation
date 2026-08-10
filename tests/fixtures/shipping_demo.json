@@ -161,7 +161,7 @@
   ],
   "cargo": [
     {
-      "id": "cargo-ever-green-01-1",
+      "id": "cargo-vessel-ever-green-01-1",
       "carrier_id": "vessel-ever-green-01",
       "commodity": "electronics",
       "quantity": 400,
@@ -169,7 +169,7 @@
       "status": "held"
     },
     {
-      "id": "cargo-ever-green-01-2",
+      "id": "cargo-vessel-ever-green-01-2",
       "carrier_id": "vessel-ever-green-01",
       "commodity": "pharmaceuticals",
       "quantity": 80,
@@ -177,7 +177,7 @@
       "status": "held"
     },
     {
-      "id": "cargo-cosco-pacific-07-1",
+      "id": "cargo-vessel-cosco-pacific-07-1",
       "carrier_id": "vessel-cosco-pacific-07",
       "commodity": "automotive_parts",
       "quantity": 600,
@@ -185,7 +185,7 @@
       "status": "in_transit"
     },
     {
-      "id": "cargo-cosco-pacific-07-2",
+      "id": "cargo-vessel-cosco-pacific-07-2",
       "carrier_id": "vessel-cosco-pacific-07",
       "commodity": "apparel",
       "quantity": 2000,
@@ -193,7 +193,7 @@
       "status": "in_transit"
     },
     {
-      "id": "cargo-maersk-horizon-03-1",
+      "id": "cargo-vessel-maersk-horizon-03-1",
       "carrier_id": "vessel-maersk-horizon-03",
       "commodity": "semiconductors",
       "quantity": 50,
@@ -201,7 +201,7 @@
       "status": "held"
     },
     {
-      "id": "cargo-maersk-horizon-03-2",
+      "id": "cargo-vessel-maersk-horizon-03-2",
       "carrier_id": "vessel-maersk-horizon-03",
       "commodity": "perishables",
       "quantity": 120,
@@ -209,7 +209,7 @@
       "status": "held"
     },
     {
-      "id": "cargo-hapag-transpac-12-1",
+      "id": "cargo-vessel-hapag-transpac-12-1",
       "carrier_id": "vessel-hapag-transpac-12",
       "commodity": "machinery",
       "quantity": 20,
@@ -217,7 +217,7 @@
       "status": "in_transit"
     },
     {
-      "id": "cargo-one-cascade-09-1",
+      "id": "cargo-vessel-one-cascade-09-1",
       "carrier_id": "vessel-one-cascade-09",
       "commodity": "furniture",
       "quantity": 800,
@@ -225,7 +225,7 @@
       "status": "in_transit"
     },
     {
-      "id": "cargo-yangming-star-02-1",
+      "id": "cargo-vessel-yangming-star-02-1",
       "carrier_id": "vessel-yangming-star-02",
       "commodity": "medical_devices",
       "quantity": 40,
@@ -233,7 +233,7 @@
       "status": "in_transit"
     },
     {
-      "id": "cargo-yangming-star-02-2",
+      "id": "cargo-vessel-yangming-star-02-2",
       "carrier_id": "vessel-yangming-star-02",
       "commodity": "industrial_chemicals",
       "quantity": 100,
