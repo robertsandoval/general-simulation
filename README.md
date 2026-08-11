@@ -4,7 +4,7 @@ A **domain-agnostic** simulation and impact-reasoning platform built on:
 
 | Concern | Technology |
 |---|---|
-| Inference & embeddings | OpenAI-compatible endpoint (OpenAI by default; point at vLLM / Llama Stack via `LLM_BASE_URL`) |
+| Inference & embeddings | **Llama Stack** (OpenAI-compatible `/v1`); modes: OpenAI upstream or in-cluster vLLM |
 | Vector / RAG | pgvector (queried directly via asyncpg) |
 | Dependency graph | **Neo4j** (native async driver, Cypher queries) |
 | Live / geo snapshot | PostGIS, queried directly |
@@ -65,20 +65,25 @@ The remaining sections walk through each component: what it is, why it is there,
 
 OpenShift is the deployment substrate and a fixed requirement, not an interchangeable choice. Every other component is selected partly because it runs cleanly on OpenShift: Postgres via an operator, vLLM via OpenShift AI / KServe, and the application services as ordinary Deployments and CronJobs. Treating OpenShift as the constant is what lets the rest of the stack stay portable across domains.
 
-### vLLM — local inference (optional)
+### Llama Stack — inference gateway
 
-vLLM serves an open-weight language model locally on GPU, keeping inference inside your cluster. It exposes an OpenAI-compatible `/v1` interface. To use it, set `LLM_BASE_URL=http://llama-3-2-3b-instruct-vllm/v1` (Service name from `llm-service`). The model must support **structured tool calling** if you use the tool-calling path.
+On OpenShift, the API and ingestion CronJob always call **Llama Stack** (`http://llamastack:8321/v1`). Stack fronts exactly two modes:
+
+| Mode | Upstream | When to use |
+|---|---|---|
+| `openai` (default) | OpenAI API | No GPU / quickest path |
+| `local` | In-cluster `llm-service` (vLLM on OpenShift AI) | Keep weights inside the cluster |
 
 ### LLM client — the inference and RAG backend
 
-The app talks to any OpenAI-compatible inference endpoint through `src/llm/openai_client.py`. Switching providers is a configuration change, not a code change:
+The app talks to any OpenAI-compatible inference endpoint through `src/llm/openai_client.py`. Cluster defaults point at Stack; local-dev can still point at OpenAI or a laptop vLLM:
 
 | Provider | `LLM_BASE_URL` | `LLM_BACKEND` |
 |---|---|---|
-| OpenAI (default) | `https://api.openai.com/v1` | `openai` |
-| vLLM (self-hosted via `llm-service`) | `http://llama-3-2-3b-instruct-vllm/v1` | `openai` |
-| Llama Stack `/v1` | `http://llamastack.svc:8321/v1` | `openai` |
-| Llama Stack SDK | `http://llamastack.svc:8321` | `llamastack` |
+| Llama Stack (OpenShift default) | `http://llamastack:8321/v1` | `openai` |
+| OpenAI (local dev) | `https://api.openai.com/v1` | `openai` |
+| vLLM (local laptop) | `http://localhost:8080/v1` | `openai` |
+| Llama Stack SDK | `http://llamastack:8321` | `llamastack` |
 | Tests / no GPU | *(any)* | `fake` |
 
 Vector/RAG operations (embed, ingest, search) go directly to **pgvector** via asyncpg — no intermediate server required. A single `llm_embeddings` table in Postgres stores all collections.
@@ -397,18 +402,16 @@ EMBEDDING_MODEL_ID=all-MiniLM-L6-v2
 EMBEDDING_DIMENSION=384
 ```
 
-### Pointing at Llama Stack (future)
+### Pointing at Llama Stack
 
-Llama Stack exposes an OpenAI-compatible `/v1` endpoint. No code change needed:
+OpenShift umbrella deploys set this automatically. For local overrides:
 
 ```bash
 LLM_BASE_URL=http://llamastack:8321/v1
 OPENAI_API_KEY=unused
 LLM_BACKEND=openai
+GENERATION_MODEL_ID=openai/gpt-4o-mini   # or llama-3-2-3b-instruct/meta-llama/Llama-3.2-3B-Instruct
 ```
-
-Archived Llama Stack Helm chart and build configs are preserved under
-`deploy/archived/` if you want to bring it back as a sidecar.
 
 ### Running without a GPU (CI / dev laptops)
 
@@ -451,15 +454,26 @@ Core platform components (Postgres, Neo4j, API, ingestion) need no extra operato
 # 1. Log in to quay.io so podman can push images
 podman login quay.io
 
-# 2. Build and push all three container images
+# 2. Build and push container images
 make build
 
-# 3. Deploy every component in dependency order
-#    PG_PASSWORD is injected via --set; never stored in values files.
-make deploy PG_PASSWORD=<your-password>
+# 3. One umbrella release (Postgres + Neo4j + Llama Stack + API + ingestion)
+#    Secrets via --set only — never committed to values files.
+
+# Default: Llama Stack → OpenAI
+make deploy \
+  PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> \
+  OPENAI_API_KEY=<key>
+
+# Or: Llama Stack → in-cluster vLLM (needs OpenShift AI + GPU)
+make deploy LLM_MODE=local \
+  PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> \
+  HF_TOKEN=<hf-token>
 ```
 
-`make deploy` runs the steps below in order, waiting for each to be healthy before proceeding. It deploys Postgres, Neo4j, the schema bootstrap Job, the API, and the ingestion CronJob. In-cluster vLLM is opt-in via `make deploy-llm-service` (OpenShift AI).
+`make deploy` installs the umbrella chart as a **single Helm release**, creates
+`neo4j-sa` / anyuid SCC + `neo4j-auth`, and wires Llama Stack for the chosen
+`LLM_MODE` (`openai` or `local`).
 
 ---
 
@@ -467,13 +481,14 @@ make deploy PG_PASSWORD=<your-password>
 
 | Chart | Path | Key resources |
 |---|---|---|
-| `postgres` | `deploy/helm/postgres` | StatefulSet, 2 Services, ServiceAccount, ClusterRoleBinding (anyuid SCC), Secret, ConfigMap (init SQL) |
-| `neo4j` | `neo4j/neo4j` (official chart) | StatefulSet, Services, OpenShift Route (Browser UI) |
-| `bootstrap` | `deploy/helm/bootstrap` | Job (Helm post-install/upgrade hook — auto-deleted on success) |
-| `llm-service` | [ai-architecture-charts](https://rh-ai-quickstart.github.io/ai-architecture-charts) | KServe ServingRuntime + InferenceService (vLLM); off by default |
-| `llamastack` | `deploy/archived/llamastack-helm` | (archived — see `deploy/archived/` to restore) |
-| `api` | `deploy/helm/api` | Deployment, Service, OpenShift Route, ConfigMap, Secret |
-| `ingestion` | `deploy/helm/ingestion` | CronJob (every 10 min, `concurrencyPolicy: Forbid`) |
+| `general-simulation` (umbrella) | `deploy/helm/general-simulation` | Single release; pulls subcharts below |
+| `postgres` | `deploy/helm/postgres` | StatefulSet, Services, anyuid SCC, Secret, init SQL |
+| `neo4j` | `neo4j/neo4j` (official) | StatefulSet; `neo4j-sa` + anyuid for UID 7474 |
+| `bootstrap` | `deploy/helm/bootstrap` | Schema Job (Helm hook) |
+| `llama-stack` | [ai-architecture-charts](https://rh-ai-quickstart.github.io/ai-architecture-charts) | Inference gateway (`llamastack:8321`) |
+| `llm-service` | same repo | In-cluster vLLM; enabled only for `LLM_MODE=local` |
+| `api` | `deploy/helm/api` | Deployment, Service, Route |
+| `ingestion` | `deploy/helm/ingestion` | CronJob |
 
 ---
 
@@ -530,36 +545,21 @@ Re-running `make deploy-bootstrap` is fully idempotent.
 
 ---
 
-### Step 4 — Deploy in-cluster vLLM (optional, OpenShift AI)
+### Step 4 — In-cluster vLLM (local mode only)
 
-Requires Red Hat OpenShift AI (KServe). Uses the shared `llm-service` chart
-from [ai-architecture-charts](https://rh-ai-quickstart.github.io/ai-architecture-charts).
+Prefer `make deploy LLM_MODE=local`. That enables `llm-service` inside the
+umbrella and points Llama Stack at
+`http://llama-3-2-3b-instruct-vllm/v1`.
+
+Standalone / debug:
 
 ```bash
 make deploy-llm-service HF_TOKEN=<your-hf-token>
 ```
 
-This installs a KServe `ServingRuntime` + `InferenceService` for
-`meta-llama/Llama-3.2-3B-Instruct` (override models in
-`deploy/helm/llm-service-values.yaml`). The OpenAI-compatible endpoint is:
-
-```text
-http://llama-3-2-3b-instruct-vllm/v1
-```
-
-Point the API at it when deploying (and set a non-empty `OPENAI_API_KEY`):
-
-```bash
-helm upgrade api deploy/helm/api -n general-simulation \
-  --reuse-values \
-  --set llm.baseUrl=http://llama-3-2-3b-instruct-vllm/v1 \
-  --set-string llm.apiKey=unused
-```
-
-Or enable `llm-service` inside the umbrella release (`llm-service.enabled=true`)
-instead of the standalone `make deploy-llm-service` target.
-
-> First start downloads model weights and can take several minutes.
+Requires Red Hat OpenShift AI (KServe). First start downloads model weights and
+can take several minutes. Do **not** point the API at vLLM directly — Stack is
+the only client of that Service.
 
 Legacy plain Deployment manifests remain under `deploy/openshift/vllm/` and
 `deploy/archived/vllm-helm/` for reference only.
@@ -626,28 +626,28 @@ make undeploy
 ### Makefile reference
 
 ```bash
-make help                                            # List all targets and variables
-make build                                           # Build and push all images
-make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>    # Core ordered deploy
-make deploy-llm-service HF_TOKEN=<tok>              # Optional OpenShift AI vLLM
-make deploy-neo4j NEO4J_PASSWORD=<pw>               # Deploy only Neo4j
-make neo4j-connect                                  # Port-forward Neo4j locally
-make status                                         # helm list + oc get pods
-make lint-charts                                    # helm lint all charts
-make undeploy                                       # Uninstall all releases
+make help
+make build
+make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> OPENAI_API_KEY=<key>
+make deploy LLM_MODE=local PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> HF_TOKEN=<tok>
+make neo4j-connect
+make status
+make lint-charts
+make undeploy
+# Advanced per-component: deploy-postgres, deploy-neo4j, deploy-bootstrap,
+# deploy-api, deploy-ingestion, deploy-llm-service
 ```
-
-Override defaults on the command line:
 
 | Variable | Default | Description |
 |---|---|---|
+| `LLM_MODE` | `openai` | `openai` or `local` |
 | `REGISTRY` | `quay.io/rh-ai-quickstart` | Image registry root |
 | `NAMESPACE` | `general-simulation` | Target OpenShift namespace |
-| `TAG` | `latest` | Image tag for all built images |
-| `PG_PASSWORD` | *(none)* | Postgres password — required for deploy targets |
-| `NEO4J_PASSWORD` | *(none)* | Neo4j password — required for deploy and bootstrap targets |
-| `OPENAI_API_KEY` | *(none)* | API key for the inference endpoint |
-| `HF_TOKEN` | *(none)* | Hugging Face token — required for `deploy-llm-service` |
+| `TAG` | `latest` | Image tag |
+| `PG_PASSWORD` | *(none)* | Required |
+| `NEO4J_PASSWORD` | *(none)* | Required |
+| `OPENAI_API_KEY` | *(none)* | Required when `LLM_MODE=openai` |
+| `HF_TOKEN` | *(none)* | Required when `LLM_MODE=local` |
 
 ---
 
@@ -660,10 +660,13 @@ Short names resolve inside the release namespace (standalone or when this chart 
 | Postgres | `postgres:5432` | `postgres.general-simulation.svc:5432` |
 | Neo4j Bolt | `bolt://neo4j:7687` | `bolt://neo4j.general-simulation.svc:7687` |
 | Neo4j HTTP | `http://neo4j:7474` | `http://neo4j.general-simulation.svc:7474` |
-| vLLM (`llm-service`) | `http://llama-3-2-3b-instruct-vllm` | `http://llama-3-2-3b-instruct-vllm.<ns>.svc` |
+| Llama Stack | `http://llamastack:8321` | `http://llamastack.<ns>.svc:8321` |
+| vLLM (`llm-service`, local mode) | `http://llama-3-2-3b-instruct-vllm` | `http://llama-3-2-3b-instruct-vllm.<ns>.svc` |
 | API | `http://general-sim-api:8000` | `http://general-sim-api.general-simulation.svc:8000` |
 
-The umbrella chart under `deploy/helm/general-simulation` can be installed as a single release (`make deploy-umbrella`) or published to GitHub Pages for use as a Helm subchart. See [`deploy/helm/general-simulation/README.md`](deploy/helm/general-simulation/README.md).
+The umbrella chart under `deploy/helm/general-simulation` is the primary
+install path (`make deploy`). See
+[`deploy/helm/general-simulation/README.md`](deploy/helm/general-simulation/README.md).
 
 ---
 

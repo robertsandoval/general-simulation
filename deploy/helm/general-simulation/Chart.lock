@@ -8,6 +8,9 @@ dependencies:
 - name: bootstrap
   repository: file://../bootstrap
   version: 0.1.0
+- name: llama-stack
+  repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+  version: 0.8.5
 - name: llm-service
   repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
   version: 0.5.9
@@ -17,5 +20,5 @@ dependencies:
 - name: ingestion
   repository: file://../ingestion
   version: 0.1.0
-digest: sha256:8383e8049c954c856d9ce153e647e533a7d94045ba856d23d5736300146c0492
-generated: "2026-08-10T13:06:38.19648-05:00"
+digest: sha256:5ca9843ee364ac344d564d0cab7d5bd1a8ee72d85f7163d31d48fb6196302886
+generated: "2026-08-11T11:28:11.780082-05:00"

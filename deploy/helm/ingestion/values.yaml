@@ -25,14 +25,15 @@ neo4j:
   password: ""   # required — pass via --set neo4j.password=<pw>
 
 llm:
-  baseUrl: "https://api.openai.com/v1"
-  apiKey: ""
+  # Always Llama Stack — see umbrella llm.mode (openai | local).
+  baseUrl: "http://llamastack:8321/v1"
+  apiKey: "unused"
   backend: "openai"
 
 models:
-  generation: gpt-4o-mini
-  embedding: text-embedding-3-small
-  embeddingDimension: "1536"
+  generation: openai/gpt-4o-mini
+  embedding: nomic-ai/nomic-embed-text-v1.5
+  embeddingDimension: "768"
 
 resources:
   requests:
