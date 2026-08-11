@@ -9,9 +9,10 @@ name: Publish images to quay.io
 
 on:
   push:
-    branches: [main]
+    branches: [main, development, chore/gha-build-and-push]
     tags: ["v*"]
   workflow_dispatch:
+  
 
 concurrency:
   group: publish-images-${{ github.ref }}
