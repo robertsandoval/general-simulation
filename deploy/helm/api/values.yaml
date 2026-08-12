@@ -6,6 +6,12 @@ replicas: 1
 route:
   enabled: true
 
+# Admin console Route (path /admin on general-sim-api). Requires route.enabled.
+adminRoute:
+  enabled: true
+  # Optional fixed hostname; cluster ingress assigns one when empty.
+  host: ""
+
 # Block the API container until Postgres + Neo4j accept TCP connections.
 # Complements app-level lifespan retries (src.core.db.wait_for_*).
 waitFor:

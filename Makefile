@@ -231,11 +231,16 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	fi
 	@printf "\n==> Deployment complete (LLM_MODE=$(LLM_MODE)).\n"
 	@printf "    API (same-NS):  http://general-sim-api:8000\n"
+	@printf "    Admin (same-NS): http://general-sim-api:8000/admin/\n"
 	@printf "    Llama Stack:    http://llamastack:8321/v1\n"
 	@printf "    Smoke test:\n"
 	@printf "      ROUTE=\$$(oc get route general-sim-api -n $(NAMESPACE)"
 	@printf " -o jsonpath='{.spec.host}')\n"
 	@printf "      curl -s https://\$$ROUTE/health | jq .\n"
+	@printf "    Admin console:\n"
+	@printf "      ADMIN=\$$(oc get route general-sim-admin -n $(NAMESPACE)"
+	@printf " -o jsonpath='{.spec.host}')\n"
+	@printf "      open https://\$$ADMIN/admin/\n"
 	@printf "    Neo4j Browser: make neo4j-connect NAMESPACE=$(NAMESPACE)\n\n"
 
 # ── Advanced: per-component targets ───────────────────────────────────────────
@@ -315,7 +320,9 @@ deploy-api: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --set-string llm.apiKey='$(OPENAI_API_KEY)' \
 	  --wait --timeout 3m
 	@oc get route general-sim-api -n $(NAMESPACE) \
-	  -o jsonpath='    https://{.spec.host}/health{"\n"}' 2>/dev/null || true
+	  -o jsonpath='    API:    https://{.spec.host}/health{"\n"}' 2>/dev/null || true
+	@oc get route general-sim-admin -n $(NAMESPACE) \
+	  -o jsonpath='    Admin:  https://{.spec.host}/admin/{"\n"}' 2>/dev/null || true
 
 deploy-ingestion: _guard-pg-password _guard-neo4j-password _guard-helm
 	helm upgrade --install ingestion $(CHART_INGESTION) \

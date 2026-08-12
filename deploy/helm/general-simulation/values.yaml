@@ -143,6 +143,8 @@ api:
   enabled: true
   route:
     enabled: true
+  adminRoute:
+    enabled: true
   waitFor:
     enabled: true
     timeoutSeconds: 300

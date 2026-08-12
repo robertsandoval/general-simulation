@@ -20,6 +20,8 @@ Prefer `make deploy` from the repo root — it creates Neo4j auth / SCC bindings
 
 In-cluster defaults use **short Service names** (`postgres`, `neo4j`, `llamastack`, `general-sim-api`). Cross-namespace clients should use FQDNs such as `general-sim-api.<namespace>.svc:8000`.
 
+**Admin console:** served at `GET /admin/` on the API Service. On OpenShift, chart `0.0.1` creates Route `general-sim-admin` (path `/admin`) plus Route `general-sim-api` for the full API. Disable both on Kind: `--set api.route.enabled=false`.
+
 ## Chart repository (GitHub Pages)
 
 Once published:
