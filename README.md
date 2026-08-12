@@ -506,8 +506,11 @@ make deploy LLM_MODE=local \
 ### Step 1 — Build and push container images
 
 ```bash
-# Build all images (postgres + app) and push to quay.io/robertsandoval/
+# Default: push to quay.io/rh-ai-quickstart/
 make build
+
+# Local testing — your Quay org (match APP_IMAGE_NAME to your repo names):
+make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app
 
 # Or build individual images:
 make build-postgres
@@ -678,6 +681,7 @@ make undeploy
 |---|---|---|
 | `LLM_MODE` | `openai` | `openai` or `local` |
 | `REGISTRY` | `quay.io/rh-ai-quickstart` | Image registry root |
+| `APP_IMAGE_NAME` | `general-simulation-api` | App image name under `REGISTRY` (`general-sim-app` for personal Quay) |
 | `NAMESPACE` | `general-simulation` | Target OpenShift namespace |
 | `TAG` | `latest` | Image tag |
 | `PG_PASSWORD` | *(none)* | Required |

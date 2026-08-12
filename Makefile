@@ -11,12 +11,19 @@
 # LLM_MODE=local            — Llama Stack → in-cluster vLLM (OpenShift AI)
 #
 # Per-component targets: make help
+#
+# Local testing (push to your Quay org, then deploy with the same REGISTRY):
+#   make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app
+#   make deploy REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app \
+#     PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> OPENAI_API_KEY=<key>
 # =============================================================================
 
 # ── Configurable variables ────────────────────────────────────────────────────
 REGISTRY         ?= quay.io/rh-ai-quickstart
 NAMESPACE        ?= general-simulation
 TAG              ?= latest
+APP_IMAGE_NAME   ?= general-simulation-api
+POSTGRES_IMAGE_NAME ?= general-sim-postgres
 PG_PASSWORD      ?=
 NEO4J_PASSWORD   ?=
 OPENAI_API_KEY   ?=
@@ -28,8 +35,8 @@ LLM_SERVICE_VERSION    ?= 0.5.9
 LLAMA_STACK_VERSION    ?= 0.8.5
 
 # ── Derived image references ──────────────────────────────────────────────────
-IMG_POSTGRES := $(REGISTRY)/general-sim-postgres:$(TAG)
-IMG_APP      := $(REGISTRY)/general-simulation-api:$(TAG)
+IMG_POSTGRES := $(REGISTRY)/$(POSTGRES_IMAGE_NAME):$(TAG)
+IMG_APP      := $(REGISTRY)/$(APP_IMAGE_NAME):$(TAG)
 
 # ── Helm chart paths ──────────────────────────────────────────────────────────
 CHART_POSTGRES  := deploy/helm/postgres
@@ -80,6 +87,7 @@ help:
 	@printf "\nVariables:\n"
 	@printf "  %-18s %s\n" "LLM_MODE"         "$(LLM_MODE)  (openai | local)"
 	@printf "  %-18s %s\n" "REGISTRY"         "$(REGISTRY)"
+	@printf "  %-18s %s\n" "APP_IMAGE_NAME"   "$(APP_IMAGE_NAME)"
 	@printf "  %-18s %s\n" "NAMESPACE"        "$(NAMESPACE)"
 	@printf "  %-18s %s\n" "TAG"              "$(TAG)"
 	@printf "  %-18s %s\n" "PG_PASSWORD"      "(required)"
