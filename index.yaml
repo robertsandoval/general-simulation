@@ -3,7 +3,64 @@ entries:
   general-simulation:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-07T18:40:43.162118507Z"
+    created: "2026-08-12T15:40:16.342411328Z"
+    dependencies:
+    - condition: postgres.enabled
+      name: postgres
+      repository: file://../postgres
+      version: 0.1.0
+    - condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 2026.5.0
+    - condition: bootstrap.enabled
+      name: bootstrap
+      repository: file://../bootstrap
+      version: 0.1.0
+    - condition: llama-stack.enabled
+      name: llama-stack
+      repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+      version: 0.8.5
+    - condition: llm-service.enabled
+      name: llm-service
+      repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+      version: 0.5.9
+    - condition: api.enabled
+      name: api
+      repository: file://../api
+      version: 0.1.1
+    - condition: ingestion.enabled
+      name: ingestion
+      repository: file://../ingestion
+      version: 0.1.0
+    description: 'Umbrella chart for the General Simulation & Impact-Reasoning Platform.
+      Deploys Postgres (pgvector + PostGIS), Neo4j, Llama Stack, schema bootstrap,
+      the FastAPI API, and the ingestion CronJob. Optional in-cluster vLLM via llm-service
+      (OpenShift AI / KServe) for llm.mode=local. Inference always goes through Llama
+      Stack. Two modes only:   openai — Stack → OpenAI-compatible API   local  — Stack
+      → in-cluster llm-service (vLLM)  Install standalone into any namespace, or consume
+      as a Helm subchart from a parent application (same release namespace as the
+      parent). '
+    digest: c35d53cc491138767cd01de91a1d1df7940d9a75f3b76a1f0b53919d365cbaac
+    home: https://github.com/robertsandoval/general-simulation
+    keywords:
+    - simulation
+    - neo4j
+    - pgvector
+    - postgis
+    - llama-stack
+    maintainers:
+    - name: general-sim
+    name: general-simulation
+    sources:
+    - https://github.com/robertsandoval/general-simulation
+    type: application
+    urls:
+    - https://robertsandoval.github.io/general-simulation/general-simulation-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-08-12T15:40:16.336580199Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -52,7 +109,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-07T18:40:43.157344374Z"
+    created: "2026-08-12T15:40:16.332861113Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -99,4 +156,4 @@ entries:
     urls:
     - https://robertsandoval.github.io/general-simulation/general-simulation-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-07T18:40:43.153595443Z"
+generated: "2026-08-12T15:40:16.328023861Z"
