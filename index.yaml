@@ -3,7 +3,7 @@ entries:
   general-simulation:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T10:42:53.699724-05:00"
+    created: "2026-08-12T10:44:56.863202-05:00"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -33,15 +33,16 @@ entries:
       name: ingestion
       repository: file://../ingestion
       version: 0.1.0
-    description: 'Umbrella chart for the General Simulation & Impact-Reasoning Platform.
-      Deploys Postgres (pgvector + PostGIS), Neo4j, Llama Stack, schema bootstrap,
-      the FastAPI API, and the ingestion CronJob. Optional in-cluster vLLM via llm-service
-      (OpenShift AI / KServe) for llm.mode=local. Inference always goes through Llama
-      Stack. Two modes only:   openai — Stack → OpenAI-compatible API   local  — Stack
-      → in-cluster llm-service (vLLM)  Install standalone into any namespace, or consume
-      as a Helm subchart from a parent application (same release namespace as the
-      parent). '
-    digest: c35d53cc491138767cd01de91a1d1df7940d9a75f3b76a1f0b53919d365cbaac
+    deprecated: true
+    description: 'DEPRECATED: pin 0.0.1 instead. Umbrella chart for the General Simulation
+      & Impact-Reasoning Platform. Deploys Postgres (pgvector + PostGIS), Neo4j, Llama
+      Stack, schema bootstrap, the FastAPI API, and the ingestion CronJob. Optional
+      in-cluster vLLM via llm-service (OpenShift AI / KServe) for llm.mode=local.
+      Inference always goes through Llama Stack. Two modes only:   openai — Stack
+      → OpenAI-compatible API   local  — Stack → in-cluster llm-service (vLLM)  Install
+      standalone into any namespace, or consume as a Helm subchart from a parent application
+      (same release namespace as the parent). '
+    digest: 7cdf0f2ad5a9c3510ef73abaa7b30f7bedfb8af20ae0b98a29dad34fd0a0f8e0
     home: https://github.com/robertsandoval/general-simulation
     keywords:
     - simulation
@@ -60,7 +61,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T10:42:53.696186-05:00"
+    created: "2026-08-12T10:44:56.859706-05:00"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -115,4 +116,4 @@ entries:
     urls:
     - https://robertsandoval.github.io/general-simulation/general-simulation-0.0.1.tgz
     version: 0.0.1
-generated: "2026-08-12T10:42:53.692504-05:00"
+generated: "2026-08-12T10:44:56.85615-05:00"
