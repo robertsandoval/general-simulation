@@ -35,10 +35,13 @@ Parent / subchart dependency:
 ```yaml
 dependencies:
   - name: general-simulation
-    version: 0.2.0
+    version: 0.0.1
     repository: https://robertsandoval.github.io/general-simulation
     condition: general-simulation.enabled
 ```
+
+Legacy clients may still pin `0.2.0` until that version is retired from the chart repo (see below).
+
 
 ## Recommended install (Makefile)
 
@@ -108,5 +111,33 @@ API and ingestion always call `http://llamastack:8321/v1` — never OpenAI or vL
 ## Publishing a new chart version
 
 1. Bump `version` in `Chart.yaml`.
-2. Tag `chart-v0.2.0` (or run the release workflow).
-3. CI packages the chart and updates GitHub Pages (`index.yaml` + `.tgz`).
+2. Tag `chart-v<version>` (must match `Chart.yaml`, e.g. `chart-v0.0.1`) or run the **Publish Helm chart** workflow.
+3. CI packages the chart and updates GitHub Pages (`index.yaml` + `.tgz`). Older `.tgz` files are kept (`keep_files: true`).
+
+### Dual versions (e.g. 0.2.0 + 0.0.1)
+
+The chart repo can host multiple versions. Clients pin `dependencies.version` explicitly.
+`helm install` without `--version` picks the **highest** semver (so `0.2.0` stays “latest” until it is removed).
+
+To publish **0.2.0** then **0.0.1**:
+
+```bash
+# From a commit where Chart.yaml is 0.2.0
+git tag chart-v0.2.0 && git push origin chart-v0.2.0
+
+# After bumping Chart.yaml to 0.0.1 and committing
+git tag chart-v0.0.1 && git push origin chart-v0.0.1
+```
+
+### Retiring an old chart version (e.g. remove 0.2.0 after 0.0.1 is validated)
+
+1. Check out the `gh-pages` branch.
+2. Delete `general-simulation-0.2.0.tgz`.
+3. Regenerate the index (from the repo root, with only remaining `.tgz` files on `gh-pages`):
+
+   ```bash
+   helm repo index . --url https://robertsandoval.github.io/general-simulation
+   ```
+
+4. Commit and push `gh-pages`.
+5. Tell clients on `0.2.0` to bump their parent chart to `0.0.1` and run `helm dependency update`.
