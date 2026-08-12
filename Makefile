@@ -45,7 +45,10 @@ HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
 
 # Stack model ids (providerKey/model.id)
 GEN_MODEL_OPENAI := openai/gpt-4o-mini
-GEN_MODEL_LOCAL  := llama-3-2-3b-instruct/meta-llama/Llama-3.2-3B-Instruct
+# Must match global.models / llm-service.models key + id from values.yaml
+LOCAL_MODEL_KEY  ?= deepseek-r1-distill-qwen-1-5b
+LOCAL_MODEL_ID   ?= deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+GEN_MODEL_LOCAL  := $(LOCAL_MODEL_KEY)/$(LOCAL_MODEL_ID)
 
 # ── Phony declarations ────────────────────────────────────────────────────────
 .PHONY: all help \
@@ -182,9 +185,11 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	    --set-string ingestion.postgres.password='$(PG_PASSWORD)' \
 	    --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
 	    --set global.models.openai.enabled=false \
-	    --set global.models.llama-3-2-3b-instruct.enabled=true \
+	    --set global.models.$(LOCAL_MODEL_KEY).enabled=true \
+	    --set-string global.models.$(LOCAL_MODEL_KEY).id='$(LOCAL_MODEL_ID)' \
 	    --set llm-service.enabled=true \
-	    --set llm-service.models.llama-3-2-3b-instruct.enabled=true \
+	    --set llm-service.models.$(LOCAL_MODEL_KEY).enabled=true \
+	    --set-string llm-service.models.$(LOCAL_MODEL_KEY).id='$(LOCAL_MODEL_ID)' \
 	    --set-string llm-service.secret.hf_token='$(HF_TOKEN)' \
 	    --set-string api.models.generation='$(GEN_MODEL_LOCAL)' \
 	    --set-string ingestion.models.generation='$(GEN_MODEL_LOCAL)' \
@@ -206,7 +211,7 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	    --set-string ingestion.postgres.password='$(PG_PASSWORD)' \
 	    --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
 	    --set global.models.openai.enabled=true \
-	    --set global.models.llama-3-2-3b-instruct.enabled=false \
+	    --set global.models.$(LOCAL_MODEL_KEY).enabled=false \
 	    --set-string global.models.openai.apiToken='$(OPENAI_API_KEY)' \
 	    --set llm-service.enabled=false \
 	    --set-string api.models.generation='$(GEN_MODEL_OPENAI)' \

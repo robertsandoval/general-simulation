@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE="https://general-sim-api-general-sim.apps.ocp.sandoval.lab"
+API_BASE="https://general-sim-api-general-simulation.apps.ocp.sandoval.lab"
 SCENARIO_ID="${1:-demo-001}"
 QUESTION="${2:-Port of Los Angeles is closed due to a strike. What routes and shipments are affected and what should we do?}"
 

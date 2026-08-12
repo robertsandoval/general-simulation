@@ -5,6 +5,9 @@
 #   neo4j.passwordFromSecret   (always "neo4j-auth", pre-created by Makefile)
 #   config.server.default_advertised_address  (auto-detected route hostname)
 
+# Keep Service/StatefulSet named "neo4j" (API/bootstrap expect host "neo4j").
+fullnameOverride: neo4j
+
 config:
   # Advertise Bolt on port 443 — Neo4j Browser connects via WebSocket
   # through the edge-terminated HTTPS route on that port.
