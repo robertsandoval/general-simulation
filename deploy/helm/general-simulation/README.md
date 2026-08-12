@@ -2,14 +2,23 @@
 
 Umbrella chart for the General Simulation & Impact-Reasoning Platform.
 
-## Modes
+Inference always goes through **Llama Stack**. Two modes only:
 
-| Mode | How | Namespace |
-|------|-----|-----------|
-| **Standalone** | `helm upgrade --install … -n <ns>` | Whatever `-n` you pass (e.g. `general-simulation`) |
+| Mode | Stack upstream | Extra requirements |
+|------|----------------|--------------------|
+| **openai** (default) | OpenAI (`api.openai.com`) | `OPENAI_API_KEY` |
+| **local** | In-cluster `llm-service` (vLLM) | OpenShift AI + `HF_TOKEN` |
+
+Prefer `make deploy` from the repo root — it creates Neo4j auth / SCC bindings and applies the mode overrides.
+
+## Modes of install
+
+| Install | How | Namespace |
+|---------|-----|-----------|
+| **Standalone** | `make deploy` or `helm upgrade --install … -n <ns>` | Whatever `-n` you pass |
 | **Subchart** | Parent `Chart.yaml` dependency + values | Same as the parent release |
 
-In-cluster defaults use **short Service names** (`postgres`, `neo4j`, `general-sim-api`). Cross-namespace clients should use FQDNs such as `general-sim-api.<namespace>.svc:8000`.
+In-cluster defaults use **short Service names** (`postgres`, `neo4j`, `llamastack`, `general-sim-api`). Cross-namespace clients should use FQDNs such as `general-sim-api.<namespace>.svc:8000`.
 
 ## Chart repository (GitHub Pages)
 
@@ -26,12 +35,26 @@ Parent / subchart dependency:
 ```yaml
 dependencies:
   - name: general-simulation
-    version: 0.1.0
+    version: 0.2.0
     repository: https://robertsandoval.github.io/general-simulation
     condition: general-simulation.enabled
 ```
 
-## Standalone install
+## Recommended install (Makefile)
+
+```bash
+# OpenAI via Llama Stack (default)
+make deploy \
+  PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> \
+  OPENAI_API_KEY=<key>
+
+# In-cluster vLLM via Llama Stack
+make deploy LLM_MODE=local \
+  PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> \
+  HF_TOKEN=<hf-token>
+```
+
+## Manual Helm install (openai)
 
 ```bash
 # Create Neo4j SA + anyuid SCC (UID 7474) and auth secret first
@@ -42,7 +65,11 @@ oc create secret generic neo4j-auth \
   -n general-simulation \
   --from-literal=NEO4J_AUTH="neo4j/<NEO4J_PASSWORD>"
 
-helm upgrade --install general-simulation general-simulation/general-simulation \
+helm repo add neo4j https://helm.neo4j.com/neo4j
+helm repo add ai-architecture-charts https://rh-ai-quickstart.github.io/ai-architecture-charts
+helm dependency update deploy/helm/general-simulation
+
+helm upgrade --install general-simulation ./deploy/helm/general-simulation \
   --namespace general-simulation --create-namespace \
   --set postgres.postgres.password=<PG_PASSWORD> \
   --set api.postgres.password=<PG_PASSWORD> \
@@ -51,18 +78,13 @@ helm upgrade --install general-simulation general-simulation/general-simulation 
   --set bootstrap.neo4j.password=<NEO4J_PASSWORD> \
   --set ingestion.postgres.password=<PG_PASSWORD> \
   --set ingestion.neo4j.password=<NEO4J_PASSWORD> \
-  --set-string api.llm.apiKey=<OPENAI_API_KEY> \
+  --set-string global.models.openai.apiToken=<OPENAI_API_KEY> \
   --wait --timeout 15m
 ```
 
-From a local clone (before/without Pages):
+For **local** mode, flip providers and enable llm-service (or use `make deploy LLM_MODE=local`).
 
-```bash
-make package-chart
-helm upgrade --install general-simulation ./deploy/helm/general-simulation \
-  --namespace general-simulation --create-namespace \
-  # … same --set flags as above
-```
+API and ingestion always call `http://llamastack:8321/v1` — never OpenAI or vLLM directly.
 
 ## Client URL
 
@@ -75,15 +97,16 @@ helm upgrade --install general-simulation ./deploy/helm/general-simulation \
 
 | Key | Default | Notes |
 |-----|---------|--------|
-| `postgres.enabled` | `true` | Platform always brings its own Postgres |
+| `postgres.enabled` | `true` | Platform Postgres (pgvector + PostGIS) |
 | `neo4j.enabled` | `true` | Official `neo4j/neo4j` chart |
 | `bootstrap.enabled` | `true` | Schema Job (hook) |
+| `llama-stack.enabled` | `true` | Inference gateway |
+| `llm-service.enabled` | `false` | In-cluster vLLM (local mode) |
 | `api.enabled` | `true` | FastAPI |
 | `ingestion.enabled` | `true` | CronJob |
-| `vllm.enabled` | `false` | Optional GPU inference |
 
 ## Publishing a new chart version
 
 1. Bump `version` in `Chart.yaml`.
-2. Tag `chart-v0.1.0` (or run the release workflow).
+2. Tag `chart-v0.2.0` (or run the release workflow).
 3. CI packages the chart and updates GitHub Pages (`index.yaml` + `.tgz`).

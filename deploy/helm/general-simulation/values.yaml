@@ -5,13 +5,37 @@
 # clients should use <service>.<namespace>.svc
 # (e.g. general-sim-api.general-simulation.svc).
 #
-# Secrets: never commit passwords. Pass via --set or a secrets overlay:
-#   --set postgres.postgres.password=<pw>
-#   --set api.postgres.password=<pw> --set api.neo4j.password=<pw>
-#   --set bootstrap.postgres.password=<pw> --set bootstrap.neo4j.password=<pw>
-#   --set ingestion.postgres.password=<pw> --set ingestion.neo4j.password=<pw>
-# Neo4j: pre-create Secret neo4j-auth with NEO4J_AUTH=neo4j/<password>
-#   (see README), or override neo4j.neo4j.passwordFromSecret / chart password.
+# ── LLM modes (exactly one) ───────────────────────────────────────────────────
+# Defaults below are mode=openai. make deploy LLM_MODE=openai|local applies
+# the matching --set overrides (see Makefile).
+#
+#   openai — Llama Stack → OpenAI (or any OpenAI-compatible URL)
+#   local  — Llama Stack → in-cluster llm-service / vLLM (needs OpenShift AI)
+#
+# API and ingestion always call Llama Stack (http://llamastack:8321/v1), never
+# OpenAI or vLLM directly.
+#
+# Secrets: never commit passwords/tokens. Pass via --set or a secrets overlay.
+
+# Models registered with Llama Stack (merged into the llama-stack subchart).
+# Enable exactly one provider for a given install.
+#
+# Provider KEY must be DNS-safe (no slashes) — it becomes the InferenceService
+# and Service name (<key>-vllm). Hugging Face id goes in `id:`.
+global:
+  models:
+    openai:
+      enabled: true
+      id: gpt-4o-mini
+      url: https://api.openai.com/v1
+      apiToken: ""   # required for openai mode — make deploy OPENAI_API_KEY=...
+    # No url — llm-service only creates an InferenceService when url is unset.
+    # Llama Stack then auto-fills:
+    #   http://<key>-vllm.<ns>.svc.cluster.local/v1
+    deepseek-r1-distill-qwen-1-5b:
+      enabled: false
+      id: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+      apiToken: unused
 
 # ── Postgres (always on for this platform) ────────────────────────────────────
 postgres:
@@ -22,8 +46,12 @@ postgres:
     database: sim
 
 # ── Neo4j (official neo4j/neo4j chart) ────────────────────────────────────────
+# fullnameOverride keeps Service/StatefulSet named "neo4j" when this chart is
+# installed as a subchart of release "general-simulation" (otherwise resources
+# are named after the parent release and api.neo4j.host=neo4j never resolves).
 neo4j:
   enabled: true
+  fullnameOverride: neo4j
   config:
     server.bolt.advertised_address: ":443"
     server.http.advertised_address: ":443"
@@ -35,7 +63,7 @@ neo4j:
     resources:
       cpu: "2"
       memory: 4Gi
-  # OpenShift: neo4j-sa + anyuid SCC (created by make deploy-umbrella).
+  # OpenShift: neo4j-sa + anyuid SCC (created by make deploy before install).
   podSpec:
     serviceAccountName: neo4j-sa
   services:
@@ -68,16 +96,53 @@ bootstrap:
     user: neo4j
     password: ""
 
-# ── Optional vLLM (off by default; clients often bring their own LLM) ─────────
-vllm:
+# ── Llama Stack (inference + vector gateway) ──────────────────────────────────
+llama-stack:
+  enabled: true
+  rawDeploymentMode: true
+  # Uses Secret "pgvector" (created by this umbrella) pointing at our Postgres.
+  pgvector:
+    enabled: true
+
+# ── Optional in-cluster vLLM (mode=local only) ────────────────────────────────
+# Requires Red Hat OpenShift AI (KServe). Enabled by make deploy LLM_MODE=local.
+llm-service:
   enabled: false
+  device: gpu
+  rawDeploymentMode: true
+  secret:
+    enabled: true
+    hf_token: ""
+  models:
+    deepseek-r1-distill-qwen-1-5b:
+      enabled: false
+      id: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+      device: gpu
+      resources:
+        limits:
+          cpu: "2"
+          memory: 16Gi
+        requests:
+          cpu: "1"
+          memory: 8Gi
+      args:
+        - --max-model-len
+        - "8192"
+        - --max-num-seqs
+        - "32"
+        - --gpu-memory-utilization
+        - "0.85"
+        - --enable-auto-tool-choice
+        - --chat-template
+        - /chat-templates/tool_chat_template_qwen.jinja
+        - --tool-call-parser
+        - hermes
+
 # ── FastAPI API (Service name: general-sim-api, port 8000) ─────────────────────
 api:
   enabled: true
-  # OpenShift Route; disable on Kind / plain Kubernetes.
   route:
     enabled: true
-  # Init container + lifespan retries: Postgres/Neo4j before serving traffic.
   waitFor:
     enabled: true
     timeoutSeconds: 300
@@ -94,9 +159,16 @@ api:
     user: neo4j
     password: ""
   llm:
-    baseUrl: "https://api.openai.com/v1"
-    apiKey: ""
+    # Always Llama Stack — do not point at OpenAI or vLLM directly.
+    baseUrl: "http://llamastack:8321/v1"
+    apiKey: "unused"
     backend: "openai"
+  models:
+    # Stack model id: <providerKey>/<model.id> from global.models
+    generation: openai/gpt-4o-mini
+    # Stack inline sentence-transformers (used for both modes)
+    embedding: nomic-ai/nomic-embed-text-v1.5
+    embeddingDimension: "768"
   enabledDomains: aviation,shipping
 
 # ── Ingestion CronJob ─────────────────────────────────────────────────────────
@@ -114,8 +186,12 @@ ingestion:
     user: neo4j
     password: ""
   llm:
-    baseUrl: "https://api.openai.com/v1"
-    apiKey: ""
+    baseUrl: "http://llamastack:8321/v1"
+    apiKey: "unused"
     backend: "openai"
+  models:
+    generation: openai/gpt-4o-mini
+    embedding: nomic-ai/nomic-embed-text-v1.5
+    embeddingDimension: "768"
   enabledDomains: aviation,shipping
   adapterId: opensky_flights

@@ -5,6 +5,9 @@
 #   neo4j.passwordFromSecret   (always "neo4j-auth", pre-created by Makefile)
 #   config.server.default_advertised_address  (auto-detected route hostname)
 
+# Keep Service/StatefulSet named "neo4j" (API/bootstrap expect host "neo4j").
+fullnameOverride: neo4j
+
 config:
   # Advertise Bolt on port 443 — Neo4j Browser connects via WebSocket
   # through the edge-terminated HTTPS route on that port.
@@ -25,7 +28,7 @@ neo4j:
     memory: 4Gi
 
 # OpenShift: use neo4j-sa (anyuid SCC) so UID/GID 7474 is allowed.
-# SA + ClusterRoleBinding are created by make deploy-neo4j before install.
+# SA + ClusterRoleBinding are created by make deploy before install.
 podSpec:
   serviceAccountName: neo4j-sa
 
