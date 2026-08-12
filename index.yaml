@@ -3,7 +3,7 @@ entries:
   general-simulation:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T15:40:16.342411328Z"
+    created: "2026-08-12T15:40:27.625518542Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -60,7 +60,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T15:40:16.336580199Z"
+    created: "2026-08-12T15:40:27.620045471Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -109,7 +109,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T15:40:16.332861113Z"
+    created: "2026-08-12T15:40:27.616568111Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -156,4 +156,61 @@ entries:
     urls:
     - https://robertsandoval.github.io/general-simulation/general-simulation-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-12T15:40:16.328023861Z"
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-08-12T15:40:27.612348367Z"
+    dependencies:
+    - condition: postgres.enabled
+      name: postgres
+      repository: file://../postgres
+      version: 0.1.0
+    - condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 2026.5.0
+    - condition: bootstrap.enabled
+      name: bootstrap
+      repository: file://../bootstrap
+      version: 0.1.0
+    - condition: llama-stack.enabled
+      name: llama-stack
+      repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+      version: 0.8.5
+    - condition: llm-service.enabled
+      name: llm-service
+      repository: https://rh-ai-quickstart.github.io/ai-architecture-charts
+      version: 0.5.9
+    - condition: api.enabled
+      name: api
+      repository: file://../api
+      version: 0.1.1
+    - condition: ingestion.enabled
+      name: ingestion
+      repository: file://../ingestion
+      version: 0.1.0
+    description: 'Umbrella chart for the General Simulation & Impact-Reasoning Platform.
+      Deploys Postgres (pgvector + PostGIS), Neo4j, Llama Stack, schema bootstrap,
+      the FastAPI API, and the ingestion CronJob. Optional in-cluster vLLM via llm-service
+      (OpenShift AI / KServe) for llm.mode=local. Inference always goes through Llama
+      Stack. Two modes only:   openai — Stack → OpenAI-compatible API   local  — Stack
+      → in-cluster llm-service (vLLM)  Install standalone into any namespace, or consume
+      as a Helm subchart from a parent application (same release namespace as the
+      parent). '
+    digest: d449b094f7d6233a264d99ecfafa448507b2bb71ecf6e614611a1b3ac8ec6ddf
+    home: https://github.com/robertsandoval/general-simulation
+    keywords:
+    - simulation
+    - neo4j
+    - pgvector
+    - postgis
+    - llama-stack
+    maintainers:
+    - name: general-sim
+    name: general-simulation
+    sources:
+    - https://github.com/robertsandoval/general-simulation
+    type: application
+    urls:
+    - https://robertsandoval.github.io/general-simulation/general-simulation-0.0.1.tgz
+    version: 0.0.1
+generated: "2026-08-12T15:40:27.607127542Z"
