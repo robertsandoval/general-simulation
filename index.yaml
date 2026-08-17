@@ -3,7 +3,7 @@ entries:
   general-simulation:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T11:24:40.104209-05:00"
+    created: "2026-08-17T17:01:24.653739603Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -61,7 +61,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-12T11:24:40.10099-05:00"
+    created: "2026-08-17T17:01:24.650852187Z"
     dependencies:
     - condition: postgres.enabled
       name: postgres
@@ -99,7 +99,7 @@ entries:
       → in-cluster llm-service (vLLM)  Install standalone into any namespace, or consume
       as a Helm subchart from a parent application (same release namespace as the
       parent). '
-    digest: ed98d1d1c46265704a4820d7670b7855ef36b8842ebdc0c4bf96d10428d2e0b4
+    digest: 49c397a78803b4fb54bc89cb7d562c3e58dd51e55058b161da51f8c43ae9267e
     home: https://github.com/robertsandoval/general-simulation
     keywords:
     - simulation
@@ -116,4 +116,4 @@ entries:
     urls:
     - https://robertsandoval.github.io/general-simulation/general-simulation-0.0.1.tgz
     version: 0.0.1
-generated: "2026-08-12T11:24:40.097313-05:00"
+generated: "2026-08-17T17:01:24.647388954Z"
