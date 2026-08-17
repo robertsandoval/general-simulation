@@ -5,7 +5,7 @@ Init container that blocks bootstrap until Postgres and Neo4j accept TCP.
 {{- if .Values.waitFor.enabled }}
 initContainers:
   - name: wait-for-deps
-    image: {{ .Values.image }}
+    image: {{ include "bootstrap.containerImage" . }}
     imagePullPolicy: Always
     command:
       - python

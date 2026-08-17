@@ -1,4 +1,5 @@
-image: quay.io/robertsandoval/general-sim-app:latest
+image: ""
+imageName: general-sim-api
 
 # Cron schedule (default: every 10 minutes).
 schedule: "*/10 * * * *"

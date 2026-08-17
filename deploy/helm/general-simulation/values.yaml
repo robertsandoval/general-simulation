@@ -17,12 +17,23 @@
 #
 # Secrets: never commit passwords/tokens. Pass via --set or a secrets overlay.
 
+# OpenShift-only resources (Neo4j anyuid SCC). Disable on Kind / plain Kubernetes.
+openshift:
+  neo4j:
+    scc:
+      enabled: true
+
 # Models registered with Llama Stack (merged into the llama-stack subchart).
 # Enable exactly one provider for a given install.
 #
 # Provider KEY must be DNS-safe (no slashes) — it becomes the InferenceService
 # and Service name (<key>-vllm). Hugging Face id goes in `id:`.
 global:
+  registry: quay.io/rh-ai-quickstart
+  imageTag: latest
+  images:
+    app: general-sim-api
+    postgres: general-sim-postgres
   models:
     openai:
       enabled: true
@@ -51,6 +62,8 @@ postgres:
 # are named after the parent release and api.neo4j.host=neo4j never resolves).
 neo4j:
   enabled: true
+  # Umbrella chart creates Secret neo4j-auth; skip live-cluster lookup at template time.
+  disableLookups: true
   fullnameOverride: neo4j
   config:
     server.bolt.advertised_address: ":443"
@@ -63,7 +76,7 @@ neo4j:
     resources:
       cpu: "2"
       memory: 4Gi
-  # OpenShift: neo4j-sa + anyuid SCC (created by make deploy before install).
+  # OpenShift: neo4j-sa + anyuid SCC (umbrella templates when openshift.neo4j.scc.enabled).
   podSpec:
     serviceAccountName: neo4j-sa
   services:

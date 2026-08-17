@@ -483,7 +483,7 @@ make deploy LLM_MODE=local \
 ```
 
 `make deploy` installs the umbrella chart as a **single Helm release**, creates
-`neo4j-sa` / anyuid SCC + `neo4j-auth`, and wires Llama Stack for the chosen
+`make deploy` applies the umbrella Helm chart, which creates `neo4j-sa` / anyuid SCC (when `openshift.neo4j.scc.enabled`) and Secret `neo4j-auth`, and wires Llama Stack for the chosen
 `LLM_MODE` (`openai` or `local`).
 
 ---
@@ -510,7 +510,7 @@ make deploy LLM_MODE=local \
 make build
 
 # Local testing — your Quay org (match APP_IMAGE_NAME to your repo names):
-make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app
+make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-api
 
 # Or build individual images:
 make build-postgres
@@ -552,7 +552,9 @@ oc rollout status statefulset/postgres -n general-simulation --timeout=300s
 make deploy-neo4j NEO4J_PASSWORD=<your-password>
 ```
 
-This installs the official `neo4j/neo4j` Helm chart which:
+This installs the official `neo4j/neo4j` Helm chart (advanced per-component target). The **umbrella** chart (`make deploy`) creates `neo4j-sa`, anyuid SCC, and `neo4j-auth` automatically when `openshift.neo4j.scc.enabled` is true.
+
+The standalone `deploy-neo4j` target still:
 - Creates a `neo4j-sa` ServiceAccount and grants it the `anyuid` SCC
   (Neo4j runs as UID/GID 7474, which `restricted-v2` rejects)
 - Creates a `neo4j-auth` Secret with `NEO4J_AUTH=neo4j/<password>`
@@ -681,7 +683,7 @@ make undeploy
 |---|---|---|
 | `LLM_MODE` | `openai` | `openai` or `local` |
 | `REGISTRY` | `quay.io/rh-ai-quickstart` | Image registry root |
-| `APP_IMAGE_NAME` | `general-simulation-api` | App image name under `REGISTRY` (`general-sim-app` for personal Quay) |
+| `APP_IMAGE_NAME` | `general-sim-api` | App image name under `REGISTRY` |
 | `NAMESPACE` | `general-simulation` | Target OpenShift namespace |
 | `TAG` | `latest` | Image tag |
 | `PG_PASSWORD` | *(none)* | Required |

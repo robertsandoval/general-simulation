@@ -13,8 +13,8 @@
 # Per-component targets: make help
 #
 # Local testing (push to your Quay org, then deploy with the same REGISTRY):
-#   make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app
-#   make deploy REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-app \
+#   make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-api
+#   make deploy REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-api \
 #     PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> OPENAI_API_KEY=<key>
 # =============================================================================
 
@@ -22,7 +22,7 @@
 REGISTRY         ?= quay.io/rh-ai-quickstart
 NAMESPACE        ?= general-simulation
 TAG              ?= latest
-APP_IMAGE_NAME   ?= general-simulation-api
+APP_IMAGE_NAME   ?= general-sim-api
 POSTGRES_IMAGE_NAME ?= general-sim-postgres
 PG_PASSWORD      ?=
 NEO4J_PASSWORD   ?=
@@ -164,14 +164,6 @@ deploy: deploy-umbrella
 
 deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
                  _guard-oc _guard-helm _deploy-namespace
-	@echo "==> Creating neo4j-sa + anyuid SCC binding..."
-	oc apply -f deploy/openshift/neo4j/serviceaccount.yaml -n $(NAMESPACE)
-	@sed "s/__NAMESPACE__/$(NAMESPACE)/g" deploy/openshift/neo4j/scc-binding.yaml | oc apply -f -
-	@echo "==> Creating neo4j-auth secret..."
-	@oc delete secret neo4j-auth -n $(NAMESPACE) --ignore-not-found >/dev/null
-	@oc create secret generic neo4j-auth \
-	  --from-literal=NEO4J_AUTH="neo4j/$(NEO4J_PASSWORD)" \
-	  -n $(NAMESPACE)
 	@echo "==> Updating umbrella chart dependencies..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
@@ -182,10 +174,10 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	@if [ "$(LLM_MODE)" = "local" ]; then \
 	  helm upgrade --install general-simulation $(CHART_UMBRELLA) \
 	    $(HELM_COMMON) \
-	    --set postgres.image=$(IMG_POSTGRES) \
-	    --set api.image=$(IMG_APP) \
-	    --set bootstrap.image=$(IMG_APP) \
-	    --set ingestion.image=$(IMG_APP) \
+	    --set global.registry=$(REGISTRY) \
+	    --set global.imageTag=$(TAG) \
+	    --set global.images.app=$(APP_IMAGE_NAME) \
+	    --set global.images.postgres=$(POSTGRES_IMAGE_NAME) \
 	    --set-string postgres.postgres.password='$(PG_PASSWORD)' \
 	    --set-string api.postgres.password='$(PG_PASSWORD)' \
 	    --set-string api.neo4j.password='$(NEO4J_PASSWORD)' \
@@ -208,10 +200,10 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	else \
 	  helm upgrade --install general-simulation $(CHART_UMBRELLA) \
 	    $(HELM_COMMON) \
-	    --set postgres.image=$(IMG_POSTGRES) \
-	    --set api.image=$(IMG_APP) \
-	    --set bootstrap.image=$(IMG_APP) \
-	    --set ingestion.image=$(IMG_APP) \
+	    --set global.registry=$(REGISTRY) \
+	    --set global.imageTag=$(TAG) \
+	    --set global.images.app=$(APP_IMAGE_NAME) \
+	    --set global.images.postgres=$(POSTGRES_IMAGE_NAME) \
 	    --set-string postgres.postgres.password='$(PG_PASSWORD)' \
 	    --set-string api.postgres.password='$(PG_PASSWORD)' \
 	    --set-string api.neo4j.password='$(NEO4J_PASSWORD)' \

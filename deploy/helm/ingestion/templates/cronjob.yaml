@@ -25,7 +25,7 @@ spec:
             runAsNonRoot: true
           containers:
             - name: ingestion
-              image: {{ .Values.image }}
+              image: {{ include "ingestion.containerImage" . }}
               imagePullPolicy: Always
               command:
                 - python

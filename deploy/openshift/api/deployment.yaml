@@ -54,7 +54,7 @@ spec:
 
       containers:
         - name: api
-          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-api:latest
           imagePullPolicy: Always
 
           ports:

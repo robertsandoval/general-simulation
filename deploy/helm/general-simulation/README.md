@@ -9,7 +9,7 @@ Inference always goes through **Llama Stack**. Two modes only:
 | **openai** (default) | OpenAI (`api.openai.com`) | `OPENAI_API_KEY` |
 | **local** | In-cluster `llm-service` (vLLM) | OpenShift AI + `HF_TOKEN` |
 
-Prefer `make deploy` from the repo root — it creates Neo4j auth / SCC bindings and applies the mode overrides.
+Prefer `make deploy` from the repo root — the chart creates Secret `neo4j-auth` and (on OpenShift) `neo4j-sa` + anyuid SCC when `openshift.neo4j.scc.enabled` is true.
 
 ## Modes of install
 
@@ -62,13 +62,7 @@ make deploy LLM_MODE=local \
 ## Manual Helm install (openai)
 
 ```bash
-# Create Neo4j SA + anyuid SCC (UID 7474) and auth secret first
 oc new-project general-simulation   # or --create-namespace below
-oc apply -f deploy/openshift/neo4j/serviceaccount.yaml -n general-simulation
-sed 's/__NAMESPACE__/general-simulation/g' deploy/openshift/neo4j/scc-binding.yaml | oc apply -f -
-oc create secret generic neo4j-auth \
-  -n general-simulation \
-  --from-literal=NEO4J_AUTH="neo4j/<NEO4J_PASSWORD>"
 
 helm repo add neo4j https://helm.neo4j.com/neo4j
 helm repo add ai-architecture-charts https://rh-ai-quickstart.github.io/ai-architecture-charts
@@ -76,6 +70,7 @@ helm dependency update deploy/helm/general-simulation
 
 helm upgrade --install general-simulation ./deploy/helm/general-simulation \
   --namespace general-simulation --create-namespace \
+  --set global.registry=quay.io/<your-org> \
   --set postgres.postgres.password=<PG_PASSWORD> \
   --set api.postgres.password=<PG_PASSWORD> \
   --set api.neo4j.password=<NEO4J_PASSWORD> \
@@ -85,6 +80,12 @@ helm upgrade --install general-simulation ./deploy/helm/general-simulation \
   --set ingestion.neo4j.password=<NEO4J_PASSWORD> \
   --set-string global.models.openai.apiToken=<OPENAI_API_KEY> \
   --wait --timeout 15m
+```
+
+On **Kind / plain Kubernetes**, disable OpenShift SCC resources:
+
+```bash
+--set openshift.neo4j.scc.enabled=false
 ```
 
 For **local** mode, flip providers and enable llm-service (or use `make deploy LLM_MODE=local`).

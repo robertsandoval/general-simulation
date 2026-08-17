@@ -1,8 +1,9 @@
 # Default values for the postgres chart.
 # Override sensitive values with --set on the command line; never commit them.
 
-# Container image (override with --set image=... or make build-postgres)
-image: quay.io/robertsandoval/general-sim-postgres:latest
+# Container image — leave empty to use global.registry/global.images.postgres.
+image: ""
+imageName: general-sim-postgres
 
 # Database credentials
 # postgres.password has no default — pass via: --set postgres.password=<pw>
