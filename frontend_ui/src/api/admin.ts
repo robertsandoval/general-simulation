@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, ApiError } from './client'
 import type {
   AdminStats,
   EntityDetail,
@@ -7,7 +7,18 @@ import type {
   GraphEdge,
   GraphEvent,
   GraphNode,
+  ImportCommitResponse,
+  ImportDraft,
+  ImportFormatsResponse,
+  ImportMapping,
   InjectEventRequest,
+  InjectEventResponse,
+  IngestionAdaptersResponse,
+  IngestionRunResponse,
+  PlatformConfig,
+  BootstrapResponse,
+  SyncStatus,
+  BboxEntityIdsResponse,
 } from '../types/api'
 
 export function getStats(): Promise<AdminStats> {
@@ -74,13 +85,20 @@ export function listGraphEvents(scenarioId?: string): Promise<GraphEvent[]> {
   return apiFetch<GraphEvent[]>(`/admin/graph/events${qs}`)
 }
 
-export function listGraphEdges(limit = 200): Promise<GraphEdge[]> {
-  return apiFetch<GraphEdge[]>(`/admin/graph/edges?limit=${limit}`)
+export function listGraphEdges(
+  limit = 200,
+  dependencyOnly = false,
+): Promise<GraphEdge[]> {
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    dependency_only: String(dependencyOnly),
+  })
+  return apiFetch<GraphEdge[]>(`/admin/graph/edges?${qs}`)
 }
 
 export function injectEvent(
   body: InjectEventRequest,
-): Promise<{ status: string; event_id: string }> {
+): Promise<InjectEventResponse> {
   return apiFetch('/admin/graph/events', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -93,4 +111,132 @@ export function deleteScenario(
   return apiFetch(`/admin/graph/scenarios/${encodeURIComponent(scenarioId)}`, {
     method: 'DELETE',
   })
+}
+
+export function syncScenarioSpatial(
+  scenarioId: string,
+): Promise<{
+  status: string
+  scenario_id: string
+  events: Record<string, number>
+  total_affected: number
+}> {
+  return apiFetch(
+    `/admin/graph/scenarios/${encodeURIComponent(scenarioId)}/sync-spatial`,
+    { method: 'POST' },
+  )
+}
+
+export function getSyncStatus(): Promise<SyncStatus> {
+  return apiFetch('/admin/data/sync-status')
+}
+
+export function listEntityIdsInBbox(bbox: string): Promise<BboxEntityIdsResponse> {
+  const qs = new URLSearchParams({ bbox })
+  return apiFetch(`/admin/entities/in-bbox?${qs}`)
+}
+
+export function createDependencyEdge(body: {
+  from_id: string
+  to_id: string
+  edge_type: string
+}): Promise<{ status: string; edges_affected: number }> {
+  return apiFetch('/admin/graph/dependency-edges', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function deleteDependencyEdge(params: {
+  from_id: string
+  to_id: string
+  edge_type: string
+}): Promise<{ status: string; edges_removed: number }> {
+  const qs = new URLSearchParams({
+    from_id: params.from_id,
+    to_id: params.to_id,
+    edge_type: params.edge_type,
+  })
+  return apiFetch(`/admin/graph/dependency-edges?${qs}`, { method: 'DELETE' })
+}
+
+export function listIngestionAdapters(): Promise<IngestionAdaptersResponse> {
+  return apiFetch('/admin/ingestion/adapters')
+}
+
+export function runIngestionAdapter(
+  adapterId: string,
+): Promise<IngestionRunResponse> {
+  return apiFetch('/admin/ingestion/run', {
+    method: 'POST',
+    body: JSON.stringify({ adapter_id: adapterId }),
+  })
+}
+
+export function getPlatformConfig(): Promise<PlatformConfig> {
+  return apiFetch('/admin/platform/config')
+}
+
+export function runPlatformBootstrap(): Promise<BootstrapResponse> {
+  return apiFetch('/admin/platform/bootstrap', { method: 'POST' })
+}
+
+export function getImportFormats(): Promise<ImportFormatsResponse> {
+  return apiFetch('/admin/imports/formats')
+}
+
+async function postImport(
+  path: string,
+  params: {
+    file: File
+    edgesFile?: File
+    mapping: ImportMapping
+  },
+): Promise<Response> {
+  const form = new FormData()
+  form.append('file', params.file)
+  if (params.edgesFile) {
+    form.append('edges_file', params.edgesFile)
+  }
+  form.append('mapping', JSON.stringify(params.mapping))
+  return fetch(path, {
+    method: 'POST',
+    body: form,
+    headers: { Accept: 'application/json' },
+  })
+}
+
+async function parseImportResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let body: unknown
+    try {
+      body = await response.json()
+    } catch {
+      body = await response.text().catch(() => undefined)
+    }
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      body,
+    )
+  }
+  return (await response.json()) as T
+}
+
+export async function previewGraphImport(params: {
+  file: File
+  edgesFile?: File
+  mapping: ImportMapping
+}): Promise<ImportDraft> {
+  const response = await postImport('/admin/imports/preview', params)
+  return parseImportResponse<ImportDraft>(response)
+}
+
+export async function commitGraphImport(params: {
+  file: File
+  edgesFile?: File
+  mapping: ImportMapping
+}): Promise<ImportCommitResponse> {
+  const response = await postImport('/admin/imports/commit', params)
+  return parseImportResponse<ImportCommitResponse>(response)
 }

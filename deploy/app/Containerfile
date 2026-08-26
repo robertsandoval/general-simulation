@@ -1,13 +1,13 @@
 # FastAPI application image.
 #
 # Build (from repo root):
-#   podman build -f deploy/app/Containerfile -t general-sim-app:latest .
+#   podman build -f deploy/app/Containerfile -t general-sim-api:latest .
 #
 # Run locally (expects .env in cwd):
-#   podman run --env-file .env -p 8000:8000 general-sim-app:latest
+#   podman run --env-file .env -p 8000:8000 general-sim-api:latest
 #
 # Push to registry:
-#   podman push quay.io/robertsandoval/general-sim-app:latest
+#   podman push quay.io/robertsandoval/general-sim-api:latest
 #
 # Design notes:
 #   - UBI9 Python 3.11 base (Red Hat supported, OCI-compliant).

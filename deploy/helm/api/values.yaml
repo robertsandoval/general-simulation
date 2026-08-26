@@ -1,10 +1,17 @@
-image: quay.io/robertsandoval/general-sim-app:latest
+image: ""
+imageName: general-sim-api
 
 replicas: 1
 
 # OpenShift Route (route.openshift.io/v1). Off for Kind / plain Kubernetes.
 route:
   enabled: true
+
+# Admin console Route (path /admin on general-sim-api). Requires route.enabled.
+adminRoute:
+  enabled: true
+  # Optional fixed hostname; cluster ingress assigns one when empty.
+  host: ""
 
 # Block the API container until Postgres + Neo4j accept TCP connections.
 # Complements app-level lifespan retries (src.core.db.wait_for_*).
@@ -32,22 +39,20 @@ neo4j:
   password: ""   # required — pass via --set neo4j.password=<pw>
 
 llm:
-  # Base URL for the OpenAI-compatible inference endpoint.
-  # Override to point at a self-hosted model (vLLM, Llama Stack, Ollama, etc.):
-  #   --set llm.baseUrl=http://vllm:8080/v1
-  #   --set llm.baseUrl=http://llamastack:8321/v1
-  # Cross-namespace: http://vllm.<ns>.svc:8080/v1
-  baseUrl: "https://api.openai.com/v1"
-  # API key — pass via --set llm.apiKey=<key>
-  # Set to any non-empty string for self-hosted endpoints that don't require auth.
-  apiKey: ""
+  # Always point at Llama Stack (umbrella default). Do not use OpenAI or vLLM
+  # URLs here — Stack fronts both modes (openai | local).
+  #   http://llamastack:8321/v1
+  baseUrl: "http://llamastack:8321/v1"
+  # Stack does not require a real key when the upstream token is in global.models.
+  apiKey: "unused"
   # Backend selector: openai | llamastack | fake
   backend: "openai"
 
 models:
-  generation: gpt-4o-mini
-  embedding: text-embedding-3-small
-  embeddingDimension: "1536"
+  # Stack model id form: <providerKey>/<model.id>
+  generation: openai/gpt-4o-mini
+  embedding: nomic-ai/nomic-embed-text-v1.5
+  embeddingDimension: "768"
 
 # Comma-separated domain packages to load (adapters + optional solvers).
 enabledDomains: aviation,shipping

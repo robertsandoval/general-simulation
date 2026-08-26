@@ -27,7 +27,7 @@ spec:
       {{- include "bootstrap.waitForDepsInit" . | nindent 6 }}
       containers:
         - name: bootstrap
-          image: {{ .Values.image }}
+          image: {{ include "bootstrap.containerImage" . }}
           imagePullPolicy: Always
           command: ["bootstrap-schema"]
           env:

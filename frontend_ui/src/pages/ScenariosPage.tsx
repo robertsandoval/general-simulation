@@ -19,8 +19,10 @@ import { Table, Thead, Tr, Th, Tbody, Td, ActionsColumn } from '@patternfly/reac
 import {
   deleteScenario,
   injectEvent,
+  listEntityIdsInBbox,
   listGraphEvents,
   listScenarios,
+  syncScenarioSpatial,
 } from '../api/admin'
 import { ApiError } from '../api/client'
 import type { GraphEvent } from '../types/api'
@@ -32,11 +34,13 @@ export function ScenariosPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [previewingBbox, setPreviewingBbox] = useState(false)
 
   const [eventId, setEventId] = useState('')
   const [scenarioId, setScenarioId] = useState('')
   const [description, setDescription] = useState('')
   const [affectedIds, setAffectedIds] = useState('')
+  const [bbox, setBbox] = useState('')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -58,26 +62,55 @@ export function ScenariosPage() {
     void refresh()
   }, [refresh])
 
+  const onPreviewBbox = async () => {
+    const trimmed = bbox.trim()
+    if (!trimmed) return
+    setPreviewingBbox(true)
+    setError(null)
+    try {
+      const res = await listEntityIdsInBbox(trimmed)
+      setAffectedIds(res.entity_ids.join(', '))
+      setSuccess(`Found ${res.count} entities in bbox`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Bbox preview failed')
+    } finally {
+      setPreviewingBbox(false)
+    }
+  }
+
   const onInject = async (e: React.FormEvent) => {
     e.preventDefault()
+    const trimmedBbox = bbox.trim()
+    const affected_entity_ids = affectedIds
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    if (!trimmedBbox && affected_entity_ids.length === 0) {
+      setError('Provide affected entity IDs and/or a bounding box')
+      return
+    }
+
     setSubmitting(true)
     setSuccess(null)
     setError(null)
     try {
-      const affected_entity_ids = affectedIds
-        .split(/[\s,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-      await injectEvent({
+      const res = await injectEvent({
         id: eventId.trim(),
         scenario_id: scenarioId.trim(),
         description: description.trim(),
         affected_entity_ids,
+        bbox: trimmedBbox || undefined,
       })
-      setSuccess(`Injected event ${eventId.trim()}`)
+      setSuccess(
+        `Injected event ${res.event_id}${
+          res.affected_count != null ? ` (${res.affected_count} affected)` : ''
+        }`,
+      )
       setEventId('')
       setDescription('')
       setAffectedIds('')
+      setBbox('')
       await refresh()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Inject failed')
@@ -101,13 +134,27 @@ export function ScenariosPage() {
     }
   }
 
+  const onSyncSpatial = async (sid: string) => {
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await syncScenarioSpatial(sid)
+      setSuccess(
+        `Synced spatial overlays for ${sid} (${res.total_affected} affected edges)`,
+      )
+      await refresh()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Spatial sync failed')
+    }
+  }
+
   return (
     <>
       <PageSection>
         <Title headingLevel="h1">Scenarios</Title>
         <p>
           Inject or remove simulation-event overlays. Live entity data is never
-          mutated.
+          mutated. Use a bounding box to resolve affected entities from PostGIS.
         </p>
       </PageSection>
       <PageSection>
@@ -151,6 +198,10 @@ export function ScenariosPage() {
                           <ActionsColumn
                             items={[
                               {
+                                title: 'Sync spatial',
+                                onClick: () => void onSyncSpatial(sid),
+                              },
+                              {
                                 title: 'Delete',
                                 onClick: () => void onDelete(sid),
                               },
@@ -173,6 +224,7 @@ export function ScenariosPage() {
                   <Th>Event ID</Th>
                   <Th>Scenario</Th>
                   <Th>Description</Th>
+                  <Th>Bbox</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -183,6 +235,9 @@ export function ScenariosPage() {
                     <Td dataLabel="Description">
                       {String(ev.description ?? '').slice(0, 120)}
                       {String(ev.description ?? '').length > 120 ? '…' : ''}
+                    </Td>
+                    <Td dataLabel="Bbox">
+                      {String(ev.affect_bbox ?? '—')}
                     </Td>
                   </Tr>
                 ))}
@@ -220,23 +275,44 @@ export function ScenariosPage() {
                   isRequired
                 />
               </FormGroup>
-              <FormGroup
-                label="Affected entity IDs"
-                isRequired
-                fieldId="affected"
-              >
+              <FormGroup label="Bounding box" fieldId="bbox">
+                <TextInput
+                  id="bbox"
+                  value={bbox}
+                  onChange={(_e, v) => setBbox(v)}
+                  placeholder="-12,49,3,59"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>
+                      Optional WGS84 envelope: minLon,minLat,maxLon,maxLat.
+                      Resolves AFFECTED_BY from live PostGIS geometry and
+                      re-syncs on query.
+                    </HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+                <Button
+                  variant="secondary"
+                  style={{ marginTop: '0.5rem' }}
+                  onClick={() => void onPreviewBbox()}
+                  isLoading={previewingBbox}
+                  isDisabled={!bbox.trim()}
+                >
+                  Preview entities in bbox
+                </Button>
+              </FormGroup>
+              <FormGroup label="Affected entity IDs" fieldId="affected">
                 <TextArea
                   id="affected"
                   value={affectedIds}
                   onChange={(_e, v) => setAffectedIds(v)}
                   rows={3}
-                  isRequired
                 />
                 <FormHelperText>
                   <HelperText>
                     <HelperTextItem>
-                      Comma- or whitespace-separated entity IDs that receive
-                      AFFECTED_BY edges.
+                      Comma- or whitespace-separated IDs. Required if no bbox;
+                      optional extra IDs when bbox is set.
                     </HelperTextItem>
                   </HelperText>
                 </FormHelperText>

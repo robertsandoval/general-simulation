@@ -30,7 +30,7 @@ spec:
       {{- include "api.waitForDepsInit" . | nindent 6 }}
       containers:
         - name: api
-          image: {{ .Values.image }}
+          image: {{ include "api.containerImage" . }}
           imagePullPolicy: Always
           ports:
             - name: http

@@ -126,10 +126,10 @@ export function SupplyChainMapPage() {
 
   const graphLink =
     result && result.affected_entities.length > 0
-      ? `/graph?scenario=${encodeURIComponent(result.scenario_id)}&highlight=${encodeURIComponent(result.affected_entities.join(','))}`
+      ? `/simulation/graph?scenario=${encodeURIComponent(result.scenario_id)}&highlight=${encodeURIComponent(result.affected_entities.join(','))}`
       : result
-        ? `/graph?scenario=${encodeURIComponent(result.scenario_id)}`
-        : '/graph'
+        ? `/simulation/graph?scenario=${encodeURIComponent(result.scenario_id)}`
+        : '/simulation/graph'
 
   const features = collection?.features ?? []
 

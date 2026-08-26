@@ -59,7 +59,7 @@ spec:
 
           containers:
             - name: ingest
-              image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+              image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-api:latest
               imagePullPolicy: Always
 
               # Entrypoint defined in pyproject.toml [project.scripts].

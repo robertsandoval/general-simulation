@@ -13,3 +13,17 @@ Construct the Postgres DSN from individual values.
 {{- define "bootstrap.postgresDSN" -}}
 postgresql://{{ .Values.postgres.user }}:{{ required "postgres.password is required" .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
 {{- end }}
+
+{{/*
+Resolve the bootstrap container image.
+*/}}
+{{- define "bootstrap.containerImage" -}}
+{{- if .Values.image -}}
+{{- .Values.image -}}
+{{- else -}}
+{{- $registry := .Values.global.registry | default "quay.io/rh-ai-quickstart" -}}
+{{- $tag := .Values.global.imageTag | default "latest" -}}
+{{- $name := .Values.imageName | default (.Values.global.images.app | default "general-sim-api") -}}
+{{- printf "%s/%s:%s" $registry $name $tag -}}
+{{- end -}}
+{{- end -}}

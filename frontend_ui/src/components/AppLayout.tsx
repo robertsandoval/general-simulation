@@ -8,6 +8,7 @@ import {
   MastheadMain,
   MastheadToggle,
   Nav,
+  NavGroup,
   NavItem,
   NavList,
   Page,
@@ -23,13 +24,39 @@ import {
 import BarsIcon from '@patternfly/react-icons/dist/esm/icons/bars-icon'
 import { useHealthPoll } from '../hooks/useHealthPoll'
 
-const NAV: { to: string; label: string; end?: boolean }[] = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/entities', label: 'Entities' },
-  { to: '/map', label: 'Supply chain map' },
-  { to: '/graph', label: 'Graph' },
-  { to: '/scenarios', label: 'Scenarios' },
-  { to: '/query', label: 'Query' },
+type NavLeaf = { to: string; label: string; end?: boolean }
+
+type NavSection = {
+  title: string
+  items: NavLeaf[]
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: 'Data',
+    items: [
+      { to: '/data/import', label: 'Import graph' },
+      { to: '/data/entities', label: 'Entities' },
+      { to: '/data/dependencies', label: 'Dependencies' },
+      { to: '/data/ingestion', label: 'Ingestion' },
+    ],
+  },
+  {
+    title: 'Simulation',
+    items: [
+      { to: '/simulation/scenarios', label: 'Scenarios' },
+      { to: '/simulation/map', label: 'Supply chain map' },
+      { to: '/simulation/graph', label: 'Graph' },
+    ],
+  },
+  {
+    title: 'Reasoning',
+    items: [{ to: '/reasoning/query', label: 'Impact query' }],
+  },
+  {
+    title: 'Platform',
+    items: [{ to: '/platform', label: 'Settings' }],
+  },
 ]
 
 function healthColor(
@@ -39,6 +66,10 @@ function healthColor(
   if (status === 'degraded') return 'orange'
   if (status === 'error') return 'red'
   return 'grey'
+}
+
+function isNavActive(pathname: string, to: string, end?: boolean): boolean {
+  return end ? pathname === to : pathname.startsWith(to)
 }
 
 export function AppLayout() {
@@ -60,7 +91,7 @@ export function AppLayout() {
         <MastheadBrand>
           <MastheadLogo href="/" component="a">
             <Title headingLevel="h1" size="lg">
-              Simulation Console
+              General Simulation Admin
             </Title>
           </MastheadLogo>
         </MastheadBrand>
@@ -81,21 +112,32 @@ export function AppLayout() {
   )
 
   const pageNav = (
-    <Nav aria-label="Console">
+    <Nav aria-label="Admin console">
       <NavList>
-        {NAV.map((item) => {
-          const active = item.end
-            ? location.pathname === item.to
-            : location.pathname.startsWith(item.to)
-          return (
-            <NavItem key={item.to} itemId={item.to} isActive={active}>
-              <NavLink to={item.to} end={item.end}>
-                {item.label}
-              </NavLink>
-            </NavItem>
-          )
-        })}
+        <NavItem
+          itemId="/"
+          isActive={location.pathname === '/'}
+        >
+          <NavLink to="/" end>Overview</NavLink>
+        </NavItem>
       </NavList>
+      {NAV_SECTIONS.map((section) => (
+        <NavGroup key={section.title} title={section.title}>
+          <NavList>
+            {section.items.map((item) => (
+              <NavItem
+                key={item.to}
+                itemId={item.to}
+                isActive={isNavActive(location.pathname, item.to, item.end)}
+              >
+                <NavLink to={item.to} end={item.end}>
+                  {item.label}
+                </NavLink>
+              </NavItem>
+            ))}
+          </NavList>
+        </NavGroup>
+      ))}
     </Nav>
   )
 

@@ -28,7 +28,7 @@ spec:
         fsGroup: 999
       containers:
         - name: postgres
-          image: {{ .Values.image }}
+          image: {{ include "postgres.containerImage" . }}
           imagePullPolicy: Always
           # args replaces Docker CMD; the ENTRYPOINT (docker-entrypoint.sh) still
           # runs and uses gosu to drop from root to the postgres user before

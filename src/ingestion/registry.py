@@ -103,6 +103,19 @@ def list_adapter_ids(settings: Settings | None = None) -> list[str]:
     return sorted(get_adapter_registry(settings))
 
 
+def list_adapter_catalog(
+    settings: Settings | None = None,
+) -> list[dict[str, str]]:
+    """Return ``{adapter_id, domain_id}`` for each enabled adapter."""
+    settings = settings or Settings()
+    catalog: list[dict[str, str]] = []
+    for domain_id in list_enabled_domain_ids(settings):
+        spec = DOMAIN_CATALOG[domain_id]
+        for adapter_id in sorted(spec.adapters):
+            catalog.append({"adapter_id": adapter_id, "domain_id": domain_id})
+    return catalog
+
+
 def get_adapter_class(
     adapter_id: str,
     settings: Settings | None = None,

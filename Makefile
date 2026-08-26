@@ -2,73 +2,73 @@
 # General Simulation & Impact-Reasoning Platform — Makefile
 # =============================================================================
 #
-# Usage:
-#   make build                                     Build and push all container images
-#   make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>  Deploy all components in order
-#   make undeploy                                  Uninstall all Helm releases
-#   make status                                    Show Helm release + Pod status
-#   make lint-charts                               Lint all Helm charts
+# Primary deploy (umbrella = one Helm release):
+#   make build
+#   make deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> OPENAI_API_KEY=<key>
+#   make deploy LLM_MODE=local PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> HF_TOKEN=<tok>
 #
-# Individual component targets:
-#   make build-postgres           Build and push the custom Postgres image
-#   make build-app                Build and push the FastAPI app image
-#   make deploy-postgres PG_PASSWORD=<pw>
-#   make deploy-neo4j NEO4J_PASSWORD=<pw>
-#   make deploy-bootstrap PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>
-#   make deploy-vllm
-#   make deploy-api PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>
-#   make deploy-ingestion PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>
+# LLM_MODE=openai (default) — Llama Stack → OpenAI
+# LLM_MODE=local            — Llama Stack → in-cluster vLLM (OpenShift AI)
 #
-# Variable overrides (pass on the command line):
-#   REGISTRY         Image registry root  (default: quay.io/robertsandoval)
-#   NAMESPACE        OpenShift namespace  (default: general-simulation)
-#   TAG              Image tag            (default: latest)
-#   PG_PASSWORD      Postgres password    (no default — required for deploy targets)
-#   NEO4J_PASSWORD   Neo4j password       (no default — required for deploy targets)
-#   HF_TOKEN         Hugging Face token   (needed for gated vLLM model download)
+# Per-component targets: make help
 #
-# Example:
-#   make deploy PG_PASSWORD=s3cr3t NEO4J_PASSWORD=n3o4j! OPENAI_API_KEY=sk-...
-#   make deploy-vllm HF_TOKEN=hf_...
-#   make build TAG=v1.2.3
-#   make package-chart                 # umbrella chart for Pages / subchart consumers
+# Local testing (push to your Quay org, then deploy with the same REGISTRY):
+#   make build REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-api
+#   make deploy REGISTRY=quay.io/robertsandoval APP_IMAGE_NAME=general-sim-api \
+#     PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw> OPENAI_API_KEY=<key>
 # =============================================================================
 
 # ── Configurable variables ────────────────────────────────────────────────────
 REGISTRY         ?= quay.io/rh-ai-quickstart
 NAMESPACE        ?= general-simulation
 TAG              ?= latest
+APP_IMAGE_NAME   ?= general-sim-api
+POSTGRES_IMAGE_NAME ?= general-sim-postgres
 PG_PASSWORD      ?=
 NEO4J_PASSWORD   ?=
 OPENAI_API_KEY   ?=
 HF_TOKEN         ?=
+LLM_MODE         ?= openai
 CHART_REPO_URL   ?= https://robertsandoval.github.io/general-simulation
+LLM_SERVICE_CHART_REPO ?= https://rh-ai-quickstart.github.io/ai-architecture-charts
+LLM_SERVICE_VERSION    ?= 0.5.9
+LLAMA_STACK_VERSION    ?= 0.8.5
 
 # ── Derived image references ──────────────────────────────────────────────────
-IMG_POSTGRES := $(REGISTRY)/general-sim-postgres:$(TAG)
-IMG_APP      := $(REGISTRY)/general-simulation-api:$(TAG)
-IMG_VLLM     := docker.io/vllm/vllm-openai:v0.6.3
+IMG_POSTGRES := $(REGISTRY)/$(POSTGRES_IMAGE_NAME):$(TAG)
+IMG_APP      := $(REGISTRY)/$(APP_IMAGE_NAME):$(TAG)
 
 # ── Helm chart paths ──────────────────────────────────────────────────────────
 CHART_POSTGRES  := deploy/helm/postgres
 CHART_NEO4J     := deploy/helm/neo4j
 CHART_BOOTSTRAP := deploy/helm/bootstrap
-CHART_VLLM      := deploy/helm/vllm
 CHART_API       := deploy/helm/api
 CHART_INGESTION := deploy/helm/ingestion
 CHART_UMBRELLA  := deploy/helm/general-simulation
+LLM_SERVICE_VALUES := deploy/helm/llm-service-values.yaml
 
 # Common flags passed to every helm command
+HELM_RELEASE_NAME ?= general-simulation
 HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
+
+# Stack model ids (providerKey/model.id)
+GEN_MODEL_OPENAI := openai/gpt-4o-mini
+# Must match global.models / llm-service.models key + id from values.yaml
+LOCAL_MODEL_KEY  ?= deepseek-r1-distill-qwen-1-5b
+LOCAL_MODEL_ID   ?= deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+GEN_MODEL_LOCAL  := $(LOCAL_MODEL_KEY)/$(LOCAL_MODEL_ID)
 
 # ── Phony declarations ────────────────────────────────────────────────────────
 .PHONY: all help \
         build build-postgres build-app \
-        deploy deploy-postgres deploy-neo4j deploy-bootstrap deploy-vllm \
-        deploy-api deploy-ingestion deploy-umbrella neo4j-connect \
+        deploy deploy-umbrella \
+        deploy-postgres deploy-neo4j deploy-bootstrap deploy-llm-service \
+        deploy-api deploy-ingestion neo4j-connect \
         package-chart \
         undeploy status lint-charts \
-        _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm _guard-podman
+        _guard-pg-password _guard-neo4j-password _guard-llm-mode \
+        _guard-oc _guard-helm _guard-podman \
+        _remove-orphan-neo4j-resources _remove-openshift-routes
 
 # ── Default target ────────────────────────────────────────────────────────────
 all: help
@@ -76,40 +76,49 @@ all: help
 # ── Help ──────────────────────────────────────────────────────────────────────
 help:
 	@printf "\nGeneral Simulation Platform — available targets:\n"
-	@printf "  %-36s %s\n" "build"                               "Build and push all container images"
-	@printf "  %-36s %s\n" "build-postgres"                      "Build and push Postgres image"
-	@printf "  %-36s %s\n" "build-app"                           "Build and push FastAPI app image"
-	@printf "  %-36s %s\n" "deploy PG_PASSWORD=<pw> NEO4J_PASSWORD=<pw>" "Deploy all components in order"
-	@printf "  %-36s %s\n" "deploy-postgres"                     "Deploy only Postgres"
-	@printf "  %-36s %s\n" "deploy-neo4j"                        "Deploy only Neo4j"
-	@printf "  %-36s %s\n" "neo4j-connect"                       "Port-forward Neo4j and print connection URLs"
-	@printf "  %-36s %s\n" "deploy-bootstrap"                    "Deploy only schema bootstrap Job"
-	@printf "  %-36s %s\n" "deploy-vllm"                         "Deploy only vLLM (optional)"
-	@printf "  %-36s %s\n" "deploy-api"                          "Deploy only FastAPI app"
-	@printf "  %-36s %s\n" "deploy-ingestion"                    "Deploy only ingestion CronJob"
-	@printf "  %-36s %s\n" "deploy-umbrella"                     "Deploy umbrella chart (single release)"
-	@printf "  %-36s %s\n" "package-chart"                       "Package umbrella chart into dist/"
-	@printf "  %-36s %s\n" "undeploy"                            "Uninstall all Helm releases"
-	@printf "  %-36s %s\n" "status"                              "Show releases and pod status"
-	@printf "  %-36s %s\n" "lint-charts"                         "Lint all Helm charts"
+	@printf "  %-40s %s\n" "build" "Build and push all container images"
+	@printf "  %-40s %s\n" "deploy PG_PASSWORD=… NEO4J_PASSWORD=…" "Umbrella install (LLM_MODE=openai|local)"
+	@printf "  %-40s %s\n" "  LLM_MODE=openai OPENAI_API_KEY=…" "  Stack → OpenAI (default)"
+	@printf "  %-40s %s\n" "  LLM_MODE=local HF_TOKEN=…" "  Stack → in-cluster vLLM (OpenShift AI)"
+	@printf "  %-40s %s\n" "deploy-postgres / deploy-neo4j / …" "Advanced per-component installs"
+	@printf "  %-40s %s\n" "neo4j-connect" "Port-forward Neo4j Browser + Bolt"
+	@printf "  %-40s %s\n" "package-chart" "Package umbrella chart into dist/"
+	@printf "  %-40s %s\n" "undeploy" "Uninstall Helm releases"
+	@printf "  %-40s %s\n" "status" "helm list + oc get pods"
+	@printf "  %-40s %s\n" "lint-charts" "helm lint"
 	@printf "\nVariables:\n"
+	@printf "  %-18s %s\n" "LLM_MODE"         "$(LLM_MODE)  (openai | local)"
 	@printf "  %-18s %s\n" "REGISTRY"         "$(REGISTRY)"
+	@printf "  %-18s %s\n" "APP_IMAGE_NAME"   "$(APP_IMAGE_NAME)"
 	@printf "  %-18s %s\n" "NAMESPACE"        "$(NAMESPACE)"
 	@printf "  %-18s %s\n" "TAG"              "$(TAG)"
-	@printf "  %-18s %s\n" "PG_PASSWORD"      "(required for deploy targets — no default)"
-	@printf "  %-18s %s\n" "NEO4J_PASSWORD"   "(required for deploy targets — no default)"
-	@printf "  %-18s %s\n" "HF_TOKEN"         "(optional — Hugging Face token for gated vLLM models)"
+	@printf "  %-18s %s\n" "PG_PASSWORD"      "(required)"
+	@printf "  %-18s %s\n" "NEO4J_PASSWORD"   "(required)"
+	@printf "  %-18s %s\n" "OPENAI_API_KEY"   "(required when LLM_MODE=openai)"
+	@printf "  %-18s %s\n" "HF_TOKEN"         "(required when LLM_MODE=local)"
 	@printf "  %-18s %s\n" "CHART_REPO_URL"   "$(CHART_REPO_URL)"
 	@printf "\n"
 
 # ── Guards ────────────────────────────────────────────────────────────────────
 _guard-pg-password:
 	@test -n "$(PG_PASSWORD)" || \
-	  { printf "ERROR: PG_PASSWORD is required.\nRun: make <target> PG_PASSWORD=<password>\n"; exit 1; }
+	  { printf "ERROR: PG_PASSWORD is required.\n"; exit 1; }
 
 _guard-neo4j-password:
 	@test -n "$(NEO4J_PASSWORD)" || \
-	  { printf "ERROR: NEO4J_PASSWORD is required.\nRun: make <target> NEO4J_PASSWORD=<password>\n"; exit 1; }
+	  { printf "ERROR: NEO4J_PASSWORD is required.\n"; exit 1; }
+
+_guard-llm-mode:
+	@case "$(LLM_MODE)" in \
+	  openai) \
+	    test -n "$(OPENAI_API_KEY)" || \
+	      { printf "ERROR: OPENAI_API_KEY is required for LLM_MODE=openai.\n"; exit 1; } ;; \
+	  local) \
+	    test -n "$(HF_TOKEN)" || \
+	      { printf "ERROR: HF_TOKEN is required for LLM_MODE=local.\n"; exit 1; } ;; \
+	  *) \
+	    printf "ERROR: LLM_MODE must be 'openai' or 'local' (got '$(LLM_MODE)').\n"; exit 1 ;; \
+	esac
 
 _guard-oc:
 	@command -v oc >/dev/null 2>&1 || \
@@ -149,9 +158,133 @@ build-app: _guard-podman
 _deploy-namespace: _guard-oc
 	oc apply -f deploy/openshift/namespace.yaml
 
-# ── Component deploy targets ──────────────────────────────────────────────────
+# Pre-Helm deploy (make deploy / oc create) left neo4j-auth, neo4j-sa, and SCC
+# bindings without Helm ownership metadata — delete those so umbrella install can manage them.
+_remove-orphan-neo4j-resources: _guard-oc
+	@echo "==> Checking for pre-Helm Neo4j OpenShift resources..."
+	@rel="$(HELM_RELEASE_NAME)"; \
+	for kind_name in "secret neo4j-auth" "serviceaccount neo4j-sa"; do \
+	  set -- $$kind_name; kind=$$1; name=$$2; \
+	  if oc get $$kind $$name -n $(NAMESPACE) >/dev/null 2>&1; then \
+	    owner=$$(oc get $$kind $$name -n $(NAMESPACE) \
+	      -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null); \
+	    if [ "$$owner" != "$$rel" ]; then \
+	      echo "    Removing orphan $$kind/$$name (not owned by Helm release $$rel)..."; \
+	      oc delete $$kind $$name -n $(NAMESPACE) --ignore-not-found; \
+	    fi; \
+	  fi; \
+	done; \
+	crb="$(NAMESPACE)-neo4j-anyuid"; \
+	if oc get clusterrolebinding $$crb >/dev/null 2>&1; then \
+	  owner=$$(oc get clusterrolebinding $$crb \
+	    -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null); \
+	  if [ "$$owner" != "$$rel" ]; then \
+	    echo "    Removing orphan clusterrolebinding/$$crb..."; \
+	    oc delete clusterrolebinding $$crb --ignore-not-found; \
+	  fi; \
+	fi
 
-## Step 1 — Postgres
+# OpenShift Routes — chart uses general-sim-admin; older/manual installs used admin-console.
+_remove-openshift-routes: _guard-oc
+	@echo "==> Removing OpenShift Routes in namespace $(NAMESPACE)..."
+	@ns="$(NAMESPACE)"; \
+	delete_if_present() { \
+	  name="$$1"; \
+	  [ -z "$$name" ] && return 0; \
+	  if oc get route "$$name" -n "$$ns" >/dev/null 2>&1; then \
+	    echo "    Deleting route/$$name..."; \
+	    oc delete route "$$name" -n "$$ns" --ignore-not-found; \
+	  fi; \
+	}; \
+	for name in admin-console general-sim-admin general-sim-api neo4j; do \
+	  delete_if_present "$$name"; \
+	done; \
+	oc delete route -l app.kubernetes.io/component=admin -n "$$ns" --ignore-not-found 2>/dev/null || true; \
+	for r in $$(oc get route -n "$$ns" -o go-template='{{range .items}}{{if or (eq .spec.to.name "general-sim-api") (eq .spec.to.name "neo4j") (eq .spec.path "/admin")}}{{.metadata.name}}{{" "}}{{end}}{{end}}' 2>/dev/null); do \
+	  delete_if_present "$$r"; \
+	done
+
+# ── Primary deploy (umbrella) ─────────────────────────────────────────────────
+
+## One-command install: Postgres + Neo4j + bootstrap + Llama Stack + API + ingestion
+## (+ llm-service when LLM_MODE=local).
+deploy: deploy-umbrella
+
+deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
+                 _guard-oc _guard-helm _deploy-namespace _remove-orphan-neo4j-resources
+	@echo "==> Updating umbrella chart dependencies..."
+	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
+	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
+	helm dependency update $(CHART_UMBRELLA)
+	@echo "==> Deploying umbrella (LLM_MODE=$(LLM_MODE))..."
+	@if [ "$(LLM_MODE)" = "local" ]; then \
+	  helm upgrade --install $(HELM_RELEASE_NAME) $(CHART_UMBRELLA) \
+	    $(HELM_COMMON) \
+	    --set global.registry=$(REGISTRY) \
+	    --set global.imageTag=$(TAG) \
+	    --set global.images.app=$(APP_IMAGE_NAME) \
+	    --set global.images.postgres=$(POSTGRES_IMAGE_NAME) \
+	    --set-string postgres.postgres.password='$(PG_PASSWORD)' \
+	    --set-string api.postgres.password='$(PG_PASSWORD)' \
+	    --set-string api.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set-string bootstrap.postgres.password='$(PG_PASSWORD)' \
+	    --set-string bootstrap.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set-string ingestion.postgres.password='$(PG_PASSWORD)' \
+	    --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set global.models.openai.enabled=false \
+	    --set global.models.$(LOCAL_MODEL_KEY).enabled=true \
+	    --set-string global.models.$(LOCAL_MODEL_KEY).id='$(LOCAL_MODEL_ID)' \
+	    --set llm-service.enabled=true \
+	    --set llm-service.models.$(LOCAL_MODEL_KEY).enabled=true \
+	    --set-string llm-service.models.$(LOCAL_MODEL_KEY).id='$(LOCAL_MODEL_ID)' \
+	    --set-string llm-service.secret.hf_token='$(HF_TOKEN)' \
+	    --set-string api.models.generation='$(GEN_MODEL_LOCAL)' \
+	    --set-string ingestion.models.generation='$(GEN_MODEL_LOCAL)' \
+	    --set-string api.llm.apiKey=unused \
+	    --set-string ingestion.llm.apiKey=unused \
+	    --wait --timeout 25m ; \
+	else \
+	  helm upgrade --install $(HELM_RELEASE_NAME) $(CHART_UMBRELLA) \
+	    $(HELM_COMMON) \
+	    --set global.registry=$(REGISTRY) \
+	    --set global.imageTag=$(TAG) \
+	    --set global.images.app=$(APP_IMAGE_NAME) \
+	    --set global.images.postgres=$(POSTGRES_IMAGE_NAME) \
+	    --set-string postgres.postgres.password='$(PG_PASSWORD)' \
+	    --set-string api.postgres.password='$(PG_PASSWORD)' \
+	    --set-string api.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set-string bootstrap.postgres.password='$(PG_PASSWORD)' \
+	    --set-string bootstrap.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set-string ingestion.postgres.password='$(PG_PASSWORD)' \
+	    --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
+	    --set global.models.openai.enabled=true \
+	    --set global.models.$(LOCAL_MODEL_KEY).enabled=false \
+	    --set-string global.models.openai.apiToken='$(OPENAI_API_KEY)' \
+	    --set llm-service.enabled=false \
+	    --set-string api.models.generation='$(GEN_MODEL_OPENAI)' \
+	    --set-string ingestion.models.generation='$(GEN_MODEL_OPENAI)' \
+	    --set-string api.llm.apiKey=unused \
+	    --set-string ingestion.llm.apiKey=unused \
+	    --wait --timeout 15m ; \
+	fi
+	@printf "\n==> Deployment complete (LLM_MODE=$(LLM_MODE)).\n"
+	@printf "    API (same-NS):  http://general-sim-api:8000\n"
+	@printf "    Admin (same-NS): http://general-sim-api:8000/admin/\n"
+	@printf "    Llama Stack:    http://llamastack:8321/v1\n"
+	@printf "    Smoke test:\n"
+	@printf "      ROUTE=\$$(oc get route general-sim-api -n $(NAMESPACE)"
+	@printf " -o jsonpath='{.spec.host}')\n"
+	@printf "      curl -s https://\$$ROUTE/health | jq .\n"
+	@printf "    Admin console:\n"
+	@printf "      ADMIN=\$$(oc get route general-sim-admin -n $(NAMESPACE)"
+	@printf " -o jsonpath='{.spec.host}')\n"
+	@printf "      open https://\$$ADMIN/admin/\n"
+	@printf "    Neo4j Browser: make neo4j-connect NAMESPACE=$(NAMESPACE)\n\n"
+
+# ── Advanced: per-component targets ───────────────────────────────────────────
+
 deploy-postgres: _guard-pg-password _guard-oc _guard-helm _deploy-namespace
 	@echo "==> Deploying Postgres..."
 	helm upgrade --install postgres $(CHART_POSTGRES) \
@@ -161,11 +294,9 @@ deploy-postgres: _guard-pg-password _guard-oc _guard-helm _deploy-namespace
 	  --wait --timeout 5m
 	@echo "    Postgres ready."
 
-## Step 2 — Neo4j (graph DB + Browser UI)
-## Uses the official neo4j/neo4j Helm chart, mirroring the working "neo4j" project.
-## OpenShift requires anyuid SCC for UID/GID 7474 (same pattern as postgres-sa).
+## Neo4j — official chart; OpenShift needs neo4j-sa + anyuid SCC (UID 7474).
 deploy-neo4j: _guard-neo4j-password _guard-oc _guard-helm _deploy-namespace
-	@echo "==> Creating neo4j-sa ServiceAccount + anyuid SCC binding..."
+	@echo "==> Creating neo4j-sa + anyuid SCC binding..."
 	oc apply -f deploy/openshift/neo4j/serviceaccount.yaml -n $(NAMESPACE)
 	@sed "s/__NAMESPACE__/$(NAMESPACE)/g" deploy/openshift/neo4j/scc-binding.yaml | oc apply -f -
 	@echo "==> Adding/updating Neo4j Helm repo..."
@@ -173,32 +304,23 @@ deploy-neo4j: _guard-neo4j-password _guard-oc _guard-helm _deploy-namespace
 	helm repo update neo4j
 	$(eval OCP_DOMAIN   := $(shell oc get ingresses.config/cluster -o jsonpath='{.spec.domain}' 2>/dev/null))
 	$(eval NEO4J_ROUTE_HOST := neo4j-$(NAMESPACE).$(OCP_DOMAIN))
-	@echo "==> Creating neo4j-auth secret (NEO4J_AUTH=neo4j/<password>)..."
-	@# Use printf (not echo -n): macOS /bin/sh may literalize "-n" into the secret.
-	@# Pass password only — do NOT include a neo4j/ prefix in NEO4J_PASSWORD.
+	@echo "==> Creating neo4j-auth secret..."
 	@oc delete secret neo4j-auth -n $(NAMESPACE) --ignore-not-found >/dev/null
 	@oc create secret generic neo4j-auth \
 	  --from-literal=NEO4J_AUTH="neo4j/$(NEO4J_PASSWORD)" \
 	  -n $(NAMESPACE)
-	@echo "==> Deploying Neo4j via official Helm chart (neo4j/neo4j 2026.5.0)..."
 	helm upgrade --install neo4j neo4j/neo4j \
 	  --version 2026.5.0 \
 	  $(HELM_COMMON) \
 	  -f $(CHART_NEO4J)/values.yaml \
 	  --set "config.server\.default_advertised_address=$(NEO4J_ROUTE_HOST)" \
 	  --wait --timeout 10m
-	@echo "==> Creating edge-terminated HTTPS Route for Neo4j Browser..."
 	@oc create route edge neo4j \
 	  --service=neo4j --port=tcp-http \
 	  --insecure-policy=Redirect \
 	  -n $(NAMESPACE) 2>/dev/null || true
-	@printf "\n    Neo4j deployed.\n"
-	@printf "    Browser UI : https://$(NEO4J_ROUTE_HOST)/browser/\n"
-	@printf "    Bolt URI   : neo4j://$(NEO4J_ROUTE_HOST)\n\n"
+	@printf "\n    Neo4j deployed. Browser: https://$(NEO4J_ROUTE_HOST)/browser/\n\n"
 
-## Print the port-forward command and open Neo4j Browser locally.
-## Bolt cannot be proxied through an OpenShift Route; port-forward is the
-## supported access method for demo deployments.
 neo4j-connect: _guard-oc
 	@printf "\n==> Starting Neo4j port-forward (ctrl-c to stop)...\n"
 	@printf "    Browser UI: http://localhost:7474/browser/\n"
@@ -206,9 +328,7 @@ neo4j-connect: _guard-oc
 	@printf "    Username: neo4j\n\n"
 	oc port-forward svc/neo4j 7474:7474 7687:7687 -n $(NAMESPACE)
 
-## Step 3 — Schema bootstrap
 deploy-bootstrap: _guard-pg-password _guard-neo4j-password _guard-helm
-	@echo "==> Running schema bootstrap Job..."
 	helm upgrade --install bootstrap $(CHART_BOOTSTRAP) \
 	  $(HELM_COMMON) \
 	  --set image=$(IMG_APP) \
@@ -217,19 +337,21 @@ deploy-bootstrap: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --atomic --timeout 3m
 	@echo "    Bootstrap complete."
 
-## Step 4 — vLLM  (GPU required; timeout is generous for model download+load)
-deploy-vllm: _guard-helm
-	@echo "==> Deploying vLLM..."
-	helm upgrade --install vllm $(CHART_VLLM) \
+deploy-llm-service: _guard-helm _guard-oc _deploy-namespace
+	@test -n "$(HF_TOKEN)" || \
+	  { printf "ERROR: HF_TOKEN is required.\n"; exit 1; }
+	@echo "==> Deploying llm-service only (prefer: make deploy LLM_MODE=local)..."
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
+	helm upgrade --install llm-service ai-architecture-charts/llm-service \
+	  --version $(LLM_SERVICE_VERSION) \
 	  $(HELM_COMMON) \
-	  --set image=$(IMG_VLLM) \
-	  --set-string hfToken='$(HF_TOKEN)' \
-	  --wait --timeout 15m
-	@echo "    vLLM ready."
+	  -f $(LLM_SERVICE_VALUES) \
+	  --set-string secret.hf_token='$(HF_TOKEN)' \
+	  --wait --timeout 20m
+	@printf "    In-cluster vLLM via llm-service (umbrella LLM_MODE=local wires Stack).\n\n"
 
-## Step 5 — FastAPI API
 deploy-api: _guard-pg-password _guard-neo4j-password _guard-helm
-	@echo "==> Deploying FastAPI API..."
 	helm upgrade --install api $(CHART_API) \
 	  $(HELM_COMMON) \
 	  --set image=$(IMG_APP) \
@@ -237,13 +359,12 @@ deploy-api: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --set-string neo4j.password='$(NEO4J_PASSWORD)' \
 	  --set-string llm.apiKey='$(OPENAI_API_KEY)' \
 	  --wait --timeout 3m
-	@printf "    API ready. Route:\n"
 	@oc get route general-sim-api -n $(NAMESPACE) \
-	  -o jsonpath='    https://{.spec.host}/health{"\n"}' 2>/dev/null || true
+	  -o jsonpath='    API:    https://{.spec.host}/health{"\n"}' 2>/dev/null || true
+	@oc get route general-sim-admin -n $(NAMESPACE) \
+	  -o jsonpath='    Admin:  https://{.spec.host}/admin/{"\n"}' 2>/dev/null || true
 
-## Step 6 — Ingestion CronJob
 deploy-ingestion: _guard-pg-password _guard-neo4j-password _guard-helm
-	@echo "==> Deploying ingestion CronJob..."
 	helm upgrade --install ingestion $(CHART_INGESTION) \
 	  $(HELM_COMMON) \
 	  --set image=$(IMG_APP) \
@@ -253,71 +374,26 @@ deploy-ingestion: _guard-pg-password _guard-neo4j-password _guard-helm
 	  --wait --timeout 2m
 	@echo "    Ingestion CronJob configured."
 
-## Full ordered deploy (per-component releases)
-deploy: _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm \
-        deploy-postgres deploy-neo4j deploy-bootstrap deploy-vllm \
-        deploy-api deploy-ingestion
-	@printf "\n==> Full deployment complete.\n"
-	@printf "    Smoke test:\n"
-	@printf "      ROUTE=\$$(oc get route general-sim-api -n $(NAMESPACE)"
-	@printf " -o jsonpath='{.spec.host}')\n"
-	@printf "      curl -s https://\$$ROUTE/health | jq .\n"
-	@printf "\n    To open Neo4j Browser:\n"
-	@printf "      make neo4j-connect NAMESPACE=$(NAMESPACE)\n\n"
-	@printf "\n"
+# ── Package / undeploy / status / lint ────────────────────────────────────────
 
-## Single-release umbrella deploy (subchart-friendly packaging)
-deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-oc _guard-helm _deploy-namespace
-	@echo "==> Creating neo4j-sa ServiceAccount + anyuid SCC binding..."
-	oc apply -f deploy/openshift/neo4j/serviceaccount.yaml -n $(NAMESPACE)
-	@sed "s/__NAMESPACE__/$(NAMESPACE)/g" deploy/openshift/neo4j/scc-binding.yaml | oc apply -f -
-	@echo "==> Creating neo4j-auth secret..."
-	@oc delete secret neo4j-auth -n $(NAMESPACE) --ignore-not-found >/dev/null
-	@oc create secret generic neo4j-auth \
-	  --from-literal=NEO4J_AUTH="neo4j/$(NEO4J_PASSWORD)" \
-	  -n $(NAMESPACE)
-	@echo "==> Updating umbrella chart dependencies..."
-	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
-	helm repo update neo4j
-	helm dependency update $(CHART_UMBRELLA)
-	@echo "==> Deploying umbrella chart general-simulation..."
-	helm upgrade --install general-simulation $(CHART_UMBRELLA) \
-	  $(HELM_COMMON) \
-	  --set postgres.image=$(IMG_POSTGRES) \
-	  --set api.image=$(IMG_APP) \
-	  --set bootstrap.image=$(IMG_APP) \
-	  --set ingestion.image=$(IMG_APP) \
-	  --set-string postgres.postgres.password='$(PG_PASSWORD)' \
-	  --set-string api.postgres.password='$(PG_PASSWORD)' \
-	  --set-string api.neo4j.password='$(NEO4J_PASSWORD)' \
-	  --set-string bootstrap.postgres.password='$(PG_PASSWORD)' \
-	  --set-string bootstrap.neo4j.password='$(NEO4J_PASSWORD)' \
-	  --set-string ingestion.postgres.password='$(PG_PASSWORD)' \
-	  --set-string ingestion.neo4j.password='$(NEO4J_PASSWORD)' \
-	  --set-string api.llm.apiKey='$(OPENAI_API_KEY)' \
-	  --set-string ingestion.llm.apiKey='$(OPENAI_API_KEY)' \
-	  --set vllm.enabled=false \
-	  --wait --timeout 15m
-	@printf "    Umbrella release ready. Same-NS URL: http://general-sim-api:8000\n"
-	@printf "    Cross-NS URL: http://general-sim-api.$(NAMESPACE).svc:8000\n"
-
-## Package umbrella chart (for GitHub Pages / local testing)
 package-chart: _guard-helm
 	@echo "==> Packaging $(CHART_UMBRELLA) ..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
 	helm dependency update $(CHART_UMBRELLA)
 	helm lint $(CHART_UMBRELLA)
 	mkdir -p dist
 	helm package $(CHART_UMBRELLA) -d dist/
 	@echo "==> Packaged charts in dist/. Publish URL: $(CHART_REPO_URL)"
 
-# ── Undeploy ──────────────────────────────────────────────────────────────────
-undeploy: _guard-helm
+undeploy: _guard-helm _guard-oc _remove-openshift-routes
 	@echo "==> Removing Helm releases from namespace $(NAMESPACE)..."
-	helm uninstall general-simulation --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall $(HELM_RELEASE_NAME) --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall ingestion --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall api       --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall llm-service --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall vllm      --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall bootstrap --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall neo4j     --namespace $(NAMESPACE) 2>/dev/null || true
@@ -325,10 +401,10 @@ undeploy: _guard-helm
 	@echo "==> Removing Neo4j anyuid SCC binding + ServiceAccount..."
 	@oc delete clusterrolebinding $(NAMESPACE)-neo4j-anyuid --ignore-not-found >/dev/null
 	@oc delete serviceaccount neo4j-sa -n $(NAMESPACE) --ignore-not-found >/dev/null
+	@oc delete secret neo4j-auth pgvector -n $(NAMESPACE) --ignore-not-found >/dev/null
 	@echo "    Done. PVCs are NOT deleted automatically — remove manually if needed:"
 	@echo "      oc delete pvc -n $(NAMESPACE) --all"
 
-# ── Status ────────────────────────────────────────────────────────────────────
 status: _guard-helm _guard-oc
 	@echo "==> Helm releases in namespace $(NAMESPACE):"
 	@helm list --namespace $(NAMESPACE)
@@ -336,12 +412,10 @@ status: _guard-helm _guard-oc
 	@echo "==> Pod status:"
 	@oc get pods -n $(NAMESPACE)
 
-# ── Lint ──────────────────────────────────────────────────────────────────────
 lint-charts: _guard-helm
 	@for chart in \
 	  $(CHART_POSTGRES) \
 	  $(CHART_BOOTSTRAP) \
-	  $(CHART_VLLM) \
 	  $(CHART_API) \
 	  $(CHART_INGESTION); do \
 	  printf "==> Linting $$chart ...\n"; \
@@ -350,6 +424,8 @@ lint-charts: _guard-helm
 	@echo "==> Updating and linting umbrella chart..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
+	helm repo add ai-architecture-charts $(LLM_SERVICE_CHART_REPO) 2>/dev/null || true
+	helm repo update ai-architecture-charts
 	helm dependency update $(CHART_UMBRELLA)
 	helm lint $(CHART_UMBRELLA)
 	@echo "==> All charts passed lint."

@@ -19,3 +19,17 @@ postgresql://{{ .Values.postgres.user }}:{{ required "postgres.password is requi
 {{- define "ingestion.neo4jURI" -}}
 bolt://{{ .Values.neo4j.host }}:{{ .Values.neo4j.port }}
 {{- end }}
+
+{{/*
+Resolve the ingestion container image.
+*/}}
+{{- define "ingestion.containerImage" -}}
+{{- if .Values.image -}}
+{{- .Values.image -}}
+{{- else -}}
+{{- $registry := .Values.global.registry | default "quay.io/rh-ai-quickstart" -}}
+{{- $tag := .Values.global.imageTag | default "latest" -}}
+{{- $name := .Values.imageName | default (.Values.global.images.app | default "general-sim-api") -}}
+{{- printf "%s/%s:%s" $registry $name $tag -}}
+{{- end -}}
+{{- end -}}

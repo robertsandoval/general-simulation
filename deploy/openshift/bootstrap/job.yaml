@@ -42,7 +42,7 @@ spec:
 
       containers:
         - name: bootstrap
-          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-app:latest
+          image: image-registry.openshift-image-registry.svc:5000/general-sim/general-sim-api:latest
           imagePullPolicy: Always
 
           # Calls the bootstrap-schema entrypoint defined in pyproject.toml.

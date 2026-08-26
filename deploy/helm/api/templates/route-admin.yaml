@@ -1,0 +1,25 @@
+{{- if and .Values.route.enabled .Values.adminRoute.enabled }}
+# OpenShift Route — documents and exposes the admin SPA at /admin/ on the API Service.
+# Same backend as general-sim-api; disable on Kind: --set api.route.enabled=false
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: general-sim-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  {{- if .Values.adminRoute.host }}
+  host: {{ .Values.adminRoute.host | quote }}
+  {{- end }}
+  path: /admin
+  to:
+    kind: Service
+    name: general-sim-api
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}

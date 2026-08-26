@@ -1,0 +1,28 @@
+{
+  "entities": [
+    {
+      "id": "hub-london",
+      "type": "facility",
+      "status": "active",
+      "geometry": { "type": "Point", "coordinates": [-0.12, 51.5] },
+      "attributes": { "name": "London Hub" }
+    },
+    {
+      "id": "hub-paris",
+      "type": "facility",
+      "status": "active",
+      "geometry": { "type": "Point", "coordinates": [2.35, 48.85] },
+      "attributes": { "name": "Paris Hub" }
+    },
+    {
+      "id": "link-lp",
+      "type": "link",
+      "status": "active",
+      "attributes": { "capacity": 100 }
+    }
+  ],
+  "edges": [
+    { "from_id": "hub-london", "to_id": "link-lp", "edge_type": "FEEDS" },
+    { "from_id": "link-lp", "to_id": "hub-paris", "edge_type": "DEPENDS_ON" }
+  ]
+}

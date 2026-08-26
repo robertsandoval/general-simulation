@@ -25,3 +25,17 @@ Construct the Neo4j Bolt URI from individual values.
 {{- define "api.neo4jURI" -}}
 bolt://{{ .Values.neo4j.host }}:{{ .Values.neo4j.port }}
 {{- end }}
+
+{{/*
+Resolve the API container image (see postgres.containerImage pattern).
+*/}}
+{{- define "api.containerImage" -}}
+{{- if .Values.image -}}
+{{- .Values.image -}}
+{{- else -}}
+{{- $registry := .Values.global.registry | default "quay.io/rh-ai-quickstart" -}}
+{{- $tag := .Values.global.imageTag | default "latest" -}}
+{{- $name := .Values.imageName | default (.Values.global.images.app | default "general-sim-api") -}}
+{{- printf "%s/%s:%s" $registry $name $tag -}}
+{{- end -}}
+{{- end -}}

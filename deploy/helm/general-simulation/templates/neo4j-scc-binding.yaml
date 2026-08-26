@@ -1,0 +1,19 @@
+{{- if and .Values.neo4j.enabled (.Values.openshift.neo4j.scc.enabled | default false) }}
+# ClusterRoleBinding — grants neo4j-sa the anyuid SCC on OpenShift.
+# Requires permission to create ClusterRoleBindings (namespace admin on most clusters).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-neo4j-anyuid
+  labels:
+    app.kubernetes.io/part-of: general-sim
+    app.kubernetes.io/component: neo4j
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: neo4j-sa
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -50,6 +50,8 @@ jobs:
           set -euo pipefail
           helm repo add neo4j https://helm.neo4j.com/neo4j
           helm repo update neo4j
+          helm repo add ai-architecture-charts https://rh-ai-quickstart.github.io/ai-architecture-charts
+          helm repo update ai-architecture-charts
           helm dependency update deploy/helm/general-simulation
           helm lint deploy/helm/general-simulation
           mkdir -p dist

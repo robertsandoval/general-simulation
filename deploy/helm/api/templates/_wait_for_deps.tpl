@@ -6,7 +6,7 @@ Used so the API process never races cold database starts on OpenShift.
 {{- if .Values.waitFor.enabled }}
 initContainers:
   - name: wait-for-deps
-    image: {{ .Values.image }}
+    image: {{ include "api.containerImage" . }}
     imagePullPolicy: Always
     command:
       - python

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Alert,
   Card,
@@ -12,10 +13,10 @@ import {
   Spinner,
   Title,
 } from '@patternfly/react-core'
-import { getStats } from '../api/admin'
+import { getStats, getSyncStatus } from '../api/admin'
 import { getHealth } from '../api/health'
 import { ApiError } from '../api/client'
-import type { AdminStats, HealthResponse } from '../types/api'
+import type { AdminStats, HealthResponse, SyncStatus } from '../types/api'
 
 const STAT_LABELS: { key: keyof AdminStats; label: string }[] = [
   { key: 'entity_count', label: 'Live entities' },
@@ -27,6 +28,7 @@ const STAT_LABELS: { key: keyof AdminStats; label: string }[] = [
 
 export function OverviewPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
+  const [sync, setSync] = useState<SyncStatus | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -35,10 +37,15 @@ export function OverviewPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const [s, h] = await Promise.all([getStats(), getHealth()])
+        const [s, h, syncStatus] = await Promise.all([
+          getStats(),
+          getHealth(),
+          getSyncStatus(),
+        ])
         if (!cancelled) {
           setStats(s)
           setHealth(h)
+          setSync(syncStatus)
           setError(null)
         }
       } catch (err) {
@@ -63,8 +70,8 @@ export function OverviewPage() {
       <PageSection>
         <Title headingLevel="h1">Overview</Title>
         <p>
-          Live store and dependency-graph summary for the General Simulation
-          platform.
+          Admin dashboard for the General Simulation platform — live store,
+          dependency graph, ingestion, and simulation overlays.
         </p>
       </PageSection>
       <PageSection>
@@ -84,6 +91,23 @@ export function OverviewPage() {
                   isInline
                 >
                   Postgres: {health.db}
+                </Alert>
+              </FlexItem>
+            ) : null}
+            {sync ? (
+              <FlexItem>
+                <Alert
+                  variant={sync.in_sync ? 'success' : 'warning'}
+                  title={
+                    sync.in_sync
+                      ? 'Data stores aligned'
+                      : 'Postgres / Neo4j entity drift detected'
+                  }
+                  isInline
+                >
+                  {sync.postgres_only_count} entities only in Postgres,{' '}
+                  {sync.neo4j_only_count} only in Neo4j.{' '}
+                  <Link to="/data/dependencies">View dependencies</Link>
                 </Alert>
               </FlexItem>
             ) : null}
