@@ -48,6 +48,7 @@ CHART_UMBRELLA  := deploy/helm/general-simulation
 LLM_SERVICE_VALUES := deploy/helm/llm-service-values.yaml
 
 # Common flags passed to every helm command
+HELM_RELEASE_NAME ?= general-simulation
 HELM_COMMON := --namespace $(NAMESPACE) --create-namespace
 
 # Stack model ids (providerKey/model.id)
@@ -66,7 +67,8 @@ GEN_MODEL_LOCAL  := $(LOCAL_MODEL_KEY)/$(LOCAL_MODEL_ID)
         package-chart \
         undeploy status lint-charts \
         _guard-pg-password _guard-neo4j-password _guard-llm-mode \
-        _guard-oc _guard-helm _guard-podman
+        _guard-oc _guard-helm _guard-podman \
+        _remove-orphan-neo4j-resources _remove-openshift-routes
 
 # ── Default target ────────────────────────────────────────────────────────────
 all: help
@@ -156,6 +158,52 @@ build-app: _guard-podman
 _deploy-namespace: _guard-oc
 	oc apply -f deploy/openshift/namespace.yaml
 
+# Pre-Helm deploy (make deploy / oc create) left neo4j-auth, neo4j-sa, and SCC
+# bindings without Helm ownership metadata — delete those so umbrella install can manage them.
+_remove-orphan-neo4j-resources: _guard-oc
+	@echo "==> Checking for pre-Helm Neo4j OpenShift resources..."
+	@rel="$(HELM_RELEASE_NAME)"; \
+	for kind_name in "secret neo4j-auth" "serviceaccount neo4j-sa"; do \
+	  set -- $$kind_name; kind=$$1; name=$$2; \
+	  if oc get $$kind $$name -n $(NAMESPACE) >/dev/null 2>&1; then \
+	    owner=$$(oc get $$kind $$name -n $(NAMESPACE) \
+	      -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null); \
+	    if [ "$$owner" != "$$rel" ]; then \
+	      echo "    Removing orphan $$kind/$$name (not owned by Helm release $$rel)..."; \
+	      oc delete $$kind $$name -n $(NAMESPACE) --ignore-not-found; \
+	    fi; \
+	  fi; \
+	done; \
+	crb="$(NAMESPACE)-neo4j-anyuid"; \
+	if oc get clusterrolebinding $$crb >/dev/null 2>&1; then \
+	  owner=$$(oc get clusterrolebinding $$crb \
+	    -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null); \
+	  if [ "$$owner" != "$$rel" ]; then \
+	    echo "    Removing orphan clusterrolebinding/$$crb..."; \
+	    oc delete clusterrolebinding $$crb --ignore-not-found; \
+	  fi; \
+	fi
+
+# OpenShift Routes — chart uses general-sim-admin; older/manual installs used admin-console.
+_remove-openshift-routes: _guard-oc
+	@echo "==> Removing OpenShift Routes in namespace $(NAMESPACE)..."
+	@ns="$(NAMESPACE)"; \
+	delete_if_present() { \
+	  name="$$1"; \
+	  [ -z "$$name" ] && return 0; \
+	  if oc get route "$$name" -n "$$ns" >/dev/null 2>&1; then \
+	    echo "    Deleting route/$$name..."; \
+	    oc delete route "$$name" -n "$$ns" --ignore-not-found; \
+	  fi; \
+	}; \
+	for name in admin-console general-sim-admin general-sim-api neo4j; do \
+	  delete_if_present "$$name"; \
+	done; \
+	oc delete route -l app.kubernetes.io/component=admin -n "$$ns" --ignore-not-found 2>/dev/null || true; \
+	for r in $$(oc get route -n "$$ns" -o go-template='{{range .items}}{{if or (eq .spec.to.name "general-sim-api") (eq .spec.to.name "neo4j") (eq .spec.path "/admin")}}{{.metadata.name}}{{" "}}{{end}}{{end}}' 2>/dev/null); do \
+	  delete_if_present "$$r"; \
+	done
+
 # ── Primary deploy (umbrella) ─────────────────────────────────────────────────
 
 ## One-command install: Postgres + Neo4j + bootstrap + Llama Stack + API + ingestion
@@ -163,7 +211,7 @@ _deploy-namespace: _guard-oc
 deploy: deploy-umbrella
 
 deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
-                 _guard-oc _guard-helm _deploy-namespace
+                 _guard-oc _guard-helm _deploy-namespace _remove-orphan-neo4j-resources
 	@echo "==> Updating umbrella chart dependencies..."
 	helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 	helm repo update neo4j
@@ -172,7 +220,7 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	helm dependency update $(CHART_UMBRELLA)
 	@echo "==> Deploying umbrella (LLM_MODE=$(LLM_MODE))..."
 	@if [ "$(LLM_MODE)" = "local" ]; then \
-	  helm upgrade --install general-simulation $(CHART_UMBRELLA) \
+	  helm upgrade --install $(HELM_RELEASE_NAME) $(CHART_UMBRELLA) \
 	    $(HELM_COMMON) \
 	    --set global.registry=$(REGISTRY) \
 	    --set global.imageTag=$(TAG) \
@@ -198,7 +246,7 @@ deploy-umbrella: _guard-pg-password _guard-neo4j-password _guard-llm-mode \
 	    --set-string ingestion.llm.apiKey=unused \
 	    --wait --timeout 25m ; \
 	else \
-	  helm upgrade --install general-simulation $(CHART_UMBRELLA) \
+	  helm upgrade --install $(HELM_RELEASE_NAME) $(CHART_UMBRELLA) \
 	    $(HELM_COMMON) \
 	    --set global.registry=$(REGISTRY) \
 	    --set global.imageTag=$(TAG) \
@@ -340,9 +388,9 @@ package-chart: _guard-helm
 	helm package $(CHART_UMBRELLA) -d dist/
 	@echo "==> Packaged charts in dist/. Publish URL: $(CHART_REPO_URL)"
 
-undeploy: _guard-helm
+undeploy: _guard-helm _guard-oc _remove-openshift-routes
 	@echo "==> Removing Helm releases from namespace $(NAMESPACE)..."
-	helm uninstall general-simulation --namespace $(NAMESPACE) 2>/dev/null || true
+	helm uninstall $(HELM_RELEASE_NAME) --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall ingestion --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall api       --namespace $(NAMESPACE) 2>/dev/null || true
 	helm uninstall llm-service --namespace $(NAMESPACE) 2>/dev/null || true
@@ -353,7 +401,7 @@ undeploy: _guard-helm
 	@echo "==> Removing Neo4j anyuid SCC binding + ServiceAccount..."
 	@oc delete clusterrolebinding $(NAMESPACE)-neo4j-anyuid --ignore-not-found >/dev/null
 	@oc delete serviceaccount neo4j-sa -n $(NAMESPACE) --ignore-not-found >/dev/null
-	@oc delete secret pgvector -n $(NAMESPACE) --ignore-not-found >/dev/null
+	@oc delete secret neo4j-auth pgvector -n $(NAMESPACE) --ignore-not-found >/dev/null
 	@echo "    Done. PVCs are NOT deleted automatically — remove manually if needed:"
 	@echo "      oc delete pvc -n $(NAMESPACE) --all"
 
